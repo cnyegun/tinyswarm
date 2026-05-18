@@ -20,7 +20,7 @@ npm run tiny -- https://aaltoai-for-good.com/
 6. Use the official `@opencode-ai/sdk` only.
 7. Start opencode with `createOpencode()` or connect to `TINY_OPENCODE_SERVER_URL` with `createOpencodeClient()`.
 8. Create one SDK session and call `session.prompt()` for the initial rewrite.
-9. Verify `transformed.html` with Playwright and axe.
+9. Verify the generated entrypoint with Playwright and axe through the local static server.
 10. If verification fails, call `session.prompt()` once more with the failures.
 11. Stop after that one repair pass and serve the current `transformed.html`.
 
@@ -31,7 +31,7 @@ npm run tiny -- https://aaltoai-for-good.com/
 - `audit-brief.md`: accessibility brief for the harness.
 - `task.md`: initial opencode harness task.
 - `repair-task.md`: repair task, only when verification fails.
-- `transformed.html`: final harness-written page.
+- `transformed.html`: final browser entrypoint written by the harness.
 - `verification.md`: final verification result.
 - `harness.log`: SDK harness summary.
 - `scan.log`: CLI runtime log.
@@ -44,7 +44,8 @@ npm run tiny -- https://aaltoai-for-good.com/
 - Use `@opencode-ai/sdk` for opencode server/client/session calls.
 - Default model is `deepseek/deepseek-v4-flash` with variant `max`.
 - Override with `TINY_HARNESS_MODEL=<provider>/<model>` and `TINY_HARNESS_VARIANT=<variant>`.
-- The harness owns creating and revising `transformed.html`.
+- The harness may use any frontend technology and supporting files inside the run directory.
+- The harness owns creating and revising generated files, with `transformed.html` as the final entrypoint.
 - The CLI owns scanning, task construction, verification, artifacts, and local serving.
 
 ## Verification Scope
@@ -54,10 +55,9 @@ Keep verification small and external to the agent:
 - Document title exists.
 - Exactly one `h1`.
 - `main` landmark exists.
-- No `script`, `iframe`, `object`, or `embed` elements.
-- No inline event handler attributes.
 - Axe returns no violations for the generated page.
 - Mobile viewport has no horizontal overflow.
+- Meaningful images from `facts.json` are preserved and load successfully.
 
 ## Local Server
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { AxeBuilder } from "@axe-core/playwright";
 import { createOpencode, createOpencodeClient, type OpencodeClient, type Part } from "@opencode-ai/sdk/v2";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { join, relative } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { extname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
 
 type Facts = {
@@ -19,7 +19,6 @@ type Violation = { id: string; impact: string; help: string; nodes: { target: st
 type Harness = { client: OpencodeClient; url: string; close?: () => void };
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
-const csp = "default-src 'none'; img-src data: http: https:; style-src 'unsafe-inline'; font-src data: http: https:; script-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 const mood: Record<string, string> = {
   "browser.launch": "browser goblin is polishing the goggles",
   "browser.goto": "browser goblin is visiting the original page",
@@ -87,7 +86,7 @@ async function main() {
   writeFileSync(join(runDir, "verification.md"), failures.length ? failures.map(f => `- ${f}`).join("\n") + "\n" : "No verification failures found.\n");
   log("verify.run", failures.length ? "serving after one repair with remaining failures" : "verification passed", { failures: failures.length }, failures.length ? "WARN" : "INFO");
 
-  const port = await serve(runDir);
+  const { port } = await serve(runDir);
   console.log(`Run: ${shown(runDir)}`);
   console.log(`Original: ${shown(join(runDir, "original.html"))}`);
   console.log(`Facts: ${shown(join(runDir, "facts.json"))}`);
@@ -185,7 +184,7 @@ function buildAuditBrief(facts: Facts, violations: Violation[]) {
 function buildHarnessTask(runDir: string, facts: Facts, repair: boolean, failures: string[]) {
   const run = shown(runDir);
   const images = uniqueImages(facts).map((img, i) => `- ${i + 1}. ${img.alt}: ${describeSrc(img.src)}`).join("\n") || "- No meaningful images extracted.";
-  return `# Xcessible Agent Harness Task\n\nYou are the rewrite agent for a local accessibility demo. Use your tools to inspect the inputs and write the final artifact.\n\nWorking directory: ${rootDir}\nRun directory: ${run}\nOutput file: ${run}/transformed.html\n\nInputs:\n- DESIGN.skill\n- ${run}/original.html\n- ${run}/facts.json\n- ${run}/audit-brief.md\n\nGoal:\nCreate one complete self-contained HTML document in ${run}/transformed.html. Preserve the original brand, purpose, important content, CTAs, real links, brand imagery, and partner imagery. Redesign the page freely for accessibility, readability, and responsive behavior.\n\nImplementation notes:\n- Use semantic header/nav/main/section/footer structure with one h1.\n- Include internal CSS. Do not rely on external CSS or JavaScript.\n- Avoid scripts, iframes, object/embed content, inline event handlers, and form actions.\n- Preserve every meaningful unique image from facts.json, especially brand and partner logos.\n- Copy image src values exactly from facts.json. Do not retype, shorten, regenerate, or alter data: URIs.\n- Use useful alt text, or empty alt only when nearby text already names the same brand.\n- Self-evaluate the written file before finishing. Check mobile layout, headings, landmarks, link names, focus states, and obvious axe issues.\n- Self-evaluate that every img loads with non-zero naturalWidth and naturalHeight.\n- Do not modify source code or the input artifacts. Only write transformed.html.\n\nMeaningful unique images to preserve:\n${images}\n${repair ? `\nVerification failed after the first write. This is the only repair iteration for this run. Revise transformed.html to address these failures, then stop:\n${failures.map(f => `- ${f}`).join("\n")}\n` : ""}`;
+  return `# Xcessible Agent Harness Task\n\nYou are the rewrite agent for a local accessibility demo. Use your tools to inspect the inputs and write the final artifact.\n\nWorking directory: ${rootDir}\nRun directory: ${run}\nFinal entrypoint: ${run}/transformed.html\n\nInputs:\n- DESIGN.skill\n- ${run}/original.html\n- ${run}/facts.json\n- ${run}/audit-brief.md\n\nGoal:\nCreate an accessible, high-quality redesigned version of the original page. Preserve the original brand, purpose, important content, CTAs, real links, brand imagery, and partner imagery. Redesign the page freely for accessibility, readability, visual quality, and responsive behavior.\n\nImplementation notes:\n- You may use whatever frontend technology is useful: HTML, CSS, JavaScript, TypeScript, Tailwind, build tooling, generated assets, or supporting files.\n- Keep ${run}/transformed.html as the final browser entrypoint. It may reference supporting files in ${run}.\n- Do not modify files outside ${run}. Do not modify the input artifacts.\n- Preserve every meaningful unique image from facts.json, especially brand and partner logos.\n- Copy image src values exactly from facts.json. Do not retype, shorten, regenerate, or alter data: URIs.\n- Use useful alt text, or empty alt only when nearby text already names the same brand.\n- Use semantic structure with one h1, clear landmarks, descriptive links, visible focus states, readable text, and responsive layouts.\n- Before finishing, run your own checks. If you create tooling, run install/build/test commands as appropriate. In all cases, verify the final entrypoint in a browser-like way and fix obvious issues before stopping.\n- Self-evaluate that every image loads with non-zero naturalWidth and naturalHeight.\n\nMeaningful unique images to preserve:\n${images}\n${repair ? `\nVerification failed after the first write. This is the only repair iteration for this run. Revise the generated files to address these failures, rerun your checks, then stop:\n${failures.map(f => `- ${f}`).join("\n")}\n` : ""}`;
 }
 
 async function runHarness(taskFile: string, runDir: string, phase: string) {
@@ -250,23 +249,20 @@ async function verifyTransformed(runDir: string, facts: Facts, phase: string) {
   const failures: string[] = [];
   if (!existsSync(htmlPath)) return ["transformed.html was not created"];
   log("verify.run", `checking transformed page (${phase})`);
+  const preview = await serve(runDir, 0, false);
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext({ viewport: { width: 1365, height: 900 } });
     const page = await context.newPage();
-    await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "domcontentloaded" });
+    await page.goto(`http://localhost:${preview.port}/`, { waitUntil: "networkidle" });
     const dom = await page.evaluate(() => ({
       title: document.title.trim(),
       h1: document.querySelectorAll("h1").length,
-      main: !!document.querySelector("main"),
-      badElements: document.querySelectorAll("script,iframe,object,embed").length,
-      eventHandlers: Array.from(document.querySelectorAll("*")).filter(e => e.getAttributeNames().some(n => n.startsWith("on"))).length
+      main: !!document.querySelector("main")
     }));
     if (!dom.title) failures.push("missing document title");
     if (dom.h1 !== 1) failures.push(`expected exactly one h1, found ${dom.h1}`);
     if (!dom.main) failures.push("missing main landmark");
-    if (dom.badElements) failures.push(`contains blocked active/embed elements: ${dom.badElements}`);
-    if (dom.eventHandlers) failures.push(`contains inline event handler attributes: ${dom.eventHandlers}`);
     const imageState = await page.evaluate(() => Array.from(document.images).map((img, i) => ({
       index: i + 1,
       alt: img.alt,
@@ -284,17 +280,18 @@ async function verifyTransformed(runDir: string, facts: Facts, phase: string) {
     }
     for (const v of (await runAxe(page, `transformed ${phase}`)).slice(0, 8)) failures.push(`axe ${v.id} (${v.impact}): ${v.help}`);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "domcontentloaded" });
+    await page.goto(`http://localhost:${preview.port}/`, { waitUntil: "networkidle" });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
     if (overflow) failures.push("mobile viewport has horizontal overflow");
   } finally {
     await browser.close();
+    preview.server.close();
   }
   log("verify.run", `finished ${phase} verification`, { failures: failures.length }, failures.length ? "WARN" : "INFO");
   return failures;
 }
 
-async function serve(runDir: string) {
+async function serve(runDir: string, preferredPort = 5177, announce = true) {
   const routes: Record<string, [string, string]> = {
     "/": ["transformed.html", "text/html; charset=utf-8"], "/original": ["original.html", "text/html; charset=utf-8"],
     "/facts.json": ["facts.json", "application/json; charset=utf-8"], "/audit-brief.md": ["audit-brief.md", "text/markdown; charset=utf-8"],
@@ -302,16 +299,18 @@ async function serve(runDir: string) {
     "/verification.md": ["verification.md", "text/markdown; charset=utf-8"], "/harness.log": ["harness.log", "text/plain; charset=utf-8"],
     "/scan.log": ["scan.log", "text/plain; charset=utf-8"]
   };
+  const root = resolve(runDir);
   const server = createServer((req, res) => {
-    const route = routes[new URL(req.url || "/", "http://local").pathname];
-    if (!route) { res.writeHead(404).end("Not found"); return; }
-    if (route[0] === "transformed.html") res.setHeader("Content-Security-Policy", csp);
-    res.setHeader("Content-Type", route[1]);
-    res.end(readFileSync(join(runDir, route[0])));
+    const pathname = decodeURIComponent(new URL(req.url || "/", "http://local").pathname);
+    const route = routes[pathname];
+    const file = route ? join(runDir, route[0]) : resolve(root, `.${pathname}`);
+    if (!(file === root || file.startsWith(`${root}/`)) || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404).end("Not found"); return; }
+    res.setHeader("Content-Type", route?.[1] || contentType(file));
+    res.end(readFileSync(file));
   });
-  const port = await listen(server, 5177).catch((e: NodeJS.ErrnoException) => e.code === "EADDRINUSE" ? listen(server, 0) : Promise.reject(e));
-  log("server.listen", "serving run", { port });
-  return port;
+  const port = await listen(server, preferredPort).catch((e: NodeJS.ErrnoException) => e.code === "EADDRINUSE" ? listen(server, 0) : Promise.reject(e));
+  if (announce) log("server.listen", "serving run", { port });
+  return { port, server };
 }
 
 function listen(server: Server, port: number) {
@@ -319,6 +318,24 @@ function listen(server: Server, port: number) {
     server.once("error", reject);
     server.listen(port, () => { server.off("error", reject); resolve((server.address() as { port: number }).port); });
   });
+}
+
+function contentType(file: string) {
+  return ({
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2"
+  } as Record<string, string>)[extname(file).toLowerCase()] || "application/octet-stream";
 }
 
 function squash(text = "") {

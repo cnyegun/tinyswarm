@@ -40,7 +40,7 @@ try {
     if (req.method === "POST" && req.url.startsWith("/session/mock-session/message?")) {
       const request = await body(req);
       const task = request.parts?.[0]?.text || "";
-      const out = task.split("Output file: ")[1]?.split("\n")[0]?.trim();
+      const out = (task.split("Final entrypoint: ")[1] || task.split("Output file: ")[1])?.split("\n")[0]?.trim();
       const path = join(root, out.replace("tiny-rewrite/", ""));
       writes++;
       const html = writes === 1

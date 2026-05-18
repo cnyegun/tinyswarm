@@ -8,16 +8,24 @@ Return improved UI, not just an audit. Preserve the original site's purpose, con
 
 ## Output Contract
 
-When asked to return HTML:
+Follow the caller's requested artifact format.
+
+When asked to return one HTML file:
 
 - Return exactly one complete self-contained HTML document.
 - Do not return markdown, explanations, JSON, comments about the work, or code fences.
-- Do not use JavaScript unless explicitly allowed.
-- Do not use iframes.
-- Do not use external CSS, external fonts, external images, or external scripts unless explicitly allowed.
+- Do not use JavaScript, iframes, external CSS, external fonts, external images, or external scripts unless explicitly allowed.
 - Include all CSS inside a `<style>` element.
 - Preserve real destination URLs from the source data.
 - Prefer absolute URLs from extracted facts over relative URLs from sanitized HTML.
+
+When asked to create files or use any frontend technology:
+
+- Keep the requested entrypoint path working in a browser.
+- Put supporting files only where the caller permits.
+- Do not mutate source inputs unless explicitly asked.
+- Run any relevant build, test, lint, or browser checks before finishing.
+- The final rendered page must satisfy the same accessibility standard as a single-file answer.
 
 ## Core Design Standard
 
@@ -33,6 +41,238 @@ Design for people using:
 - cognitive or attention limitations
 
 The result must be simple, readable, predictable, and robust.
+
+## WCAG-Oriented Baseline
+
+Target WCAG 2.2 AA where practical.
+
+Non-negotiable requirements:
+
+- Perceivable: text alternatives, captions/transcripts for media, sufficient contrast, no information conveyed only by color or position.
+- Operable: full keyboard access, visible focus, no keyboard traps, sufficient target size, no unexpected motion or time limits.
+- Understandable: clear labels, predictable navigation, consistent controls, helpful errors, plain language where possible.
+- Robust: valid semantic HTML, correct accessible names, minimal ARIA, and controls whose name, role, state, and value are exposed.
+
+Use native HTML semantics first. Add ARIA only when native semantics cannot express the needed meaning.
+
+## Inclusive Design Goals
+
+Accessibility compliance is the floor, not the goal. Design for disabled people as primary users, not edge cases.
+
+Use the inclusive design principle: solve for one, extend to many. A feature that helps a blind user, keyboard user, dyslexic reader, autistic user, older adult, stressed mobile user, or injured user usually improves the page for everyone.
+
+Design for permanent, temporary, and situational disability:
+
+- permanent: blindness, low vision, Deafness, mobility impairment, cognitive disability, chronic illness
+- temporary: broken arm, migraine, eye strain, medication side effects, injury recovery
+- situational: bright sun, noisy room, one-handed mobile use, slow network, stress, fatigue, distraction
+
+Inclusive goals:
+
+- Users can understand the page quickly.
+- Users can navigate by keyboard, touch, screen reader, magnifier, switch control, and speech input.
+- Users can complete primary tasks without precision, memory burden, time pressure, or sensory overload.
+- Users can recover from mistakes.
+- Users can use their own settings: zoom, text spacing, reduced motion, forced colors, dark/light preferences, and browser defaults.
+- Content does not exclude people through assumptions, idioms, ableist language, or unclear eligibility.
+
+## Inclusive Content Rules
+
+Write and structure content for comprehension.
+
+Rules:
+
+- Put the most important information first.
+- Use short paragraphs, scannable headings, and lists for grouped information.
+- Prefer plain, concrete language over slogans when explaining tasks or requirements.
+- Preserve brand voice, but do not preserve confusing, exclusionary, or inaccessible wording when clearer wording can say the same thing.
+- Avoid idioms, sarcasm, and culture-specific phrases unless they are part of the brand and the meaning is still clear.
+- Avoid ableist phrases such as “crazy”, “insane”, “blind to”, “lame”, or “dumb” unless they are source content that must be quoted.
+- Do not imply all users see, hear, click, swipe, watch, or read in the same way.
+- Use inclusive action text: “Select”, “Open”, “Start”, “Register”, “Contact”, not only “Click” or “Tap”.
+- Make eligibility, deadlines, locations, costs, and requirements explicit when present in source facts.
+- Do not invent reassurance, guarantees, or outcomes for disabled users.
+
+Helpful patterns:
+
+```html
+<section aria-labelledby="key-details">
+  <h2 id="key-details">Key details</h2>
+  <ul>
+    <li><strong>Date:</strong> 22-24 May 2026</li>
+    <li><strong>Location:</strong> Hive Helsinki</li>
+    <li><strong>Team size:</strong> Up to 5 people</li>
+  </ul>
+</section>
+```
+
+```html
+<a href="https://example.com/register">Register for Hack for Good 2026</a>
+```
+
+Avoid:
+
+```html
+<a href="https://example.com/register">Click here</a>
+```
+
+## Cognitive Accessibility Rules
+
+Reduce memory load, ambiguity, and overwhelm.
+
+Rules:
+
+- One clear primary action per section when possible.
+- Break complex information into steps or grouped cards.
+- Avoid dense walls of text.
+- Avoid unnecessary decorative complexity around important instructions.
+- Keep navigation labels consistent with section headings.
+- Repeat critical CTAs in predictable places, but avoid excessive repetition.
+- Use visible labels and helper text for unfamiliar concepts.
+- Make status, next steps, and consequences explicit.
+- Do not rely on users remembering information from a previous section.
+- Avoid auto-advancing carousels, rotating text, or disappearing messages.
+- For deadlines or schedules, use clear date/time text and preserve timezone/location when known.
+
+Good step pattern:
+
+```html
+<ol class="steps">
+  <li><strong>Apply.</strong> Submit the registration form.</li>
+  <li><strong>Build.</strong> Work with your team during the event.</li>
+  <li><strong>Demo.</strong> Present your solution to judges.</li>
+</ol>
+```
+
+## Neurodiversity and Sensory Load
+
+Make the interface calm, predictable, and controllable.
+
+Rules:
+
+- Avoid unnecessary animation, flicker, parallax, glitch effects, and rapidly changing backgrounds.
+- Avoid autoplaying sound or video.
+- Avoid flashing, pulsing CTAs, and distracting loops.
+- Use consistent spacing, alignment, and visual grouping.
+- Use strong hierarchy without overwhelming contrast patterns.
+- Do not hide essential content behind hover-only reveals.
+- Let users control disclosure, expansion, media playback, and movement.
+- Prefer stable layouts; avoid layout shifts after load.
+- Use progress indicators only when they communicate useful status.
+
+## Low Vision and Visual Adaptability
+
+Support users who zoom, magnify, use high contrast, or need clear boundaries.
+
+Rules:
+
+- Keep body text at least 1rem and avoid tiny captions for important content.
+- Use visible boundaries for cards, controls, forms, and active states.
+- Do not rely on subtle shadows or color shifts as the only boundary.
+- Avoid placing text over busy images. If unavoidable, add a solid or high-opacity overlay.
+- Preserve content at 200% zoom and 400% zoom where practical.
+- Use `currentColor` for icons where possible so forced-colors mode can adapt them.
+- Test or reason through forced-colors mode: borders, focus, and buttons must remain visible.
+- Do not lock orientation or require landscape layout.
+
+Forced-colors pattern:
+
+```css
+@media (forced-colors: active) {
+  .button {
+    border: 2px solid ButtonText;
+  }
+
+  :focus-visible {
+    outline: 3px solid Highlight;
+  }
+}
+```
+
+## Motor Accessibility Rules
+
+Support users with tremor, limited reach, switch control, keyboard-only use, or one-handed mobile use.
+
+Rules:
+
+- Primary controls should be large and separated enough to avoid accidental activation.
+- Do not put destructive or opposite actions too close together without clear separation.
+- Avoid requiring drag, swipe, hover, long press, or multi-touch gestures.
+- Provide keyboard and simple click alternatives for any pointer gesture.
+- Keep focusable controls reachable in logical order.
+- Do not create hidden keyboard traps.
+- Make sticky headers/footers compact enough that they do not block content or focus outlines.
+- Do not require users to complete actions within a short time limit.
+
+## Screen Reader and Speech Input Rules
+
+Accessible names must be useful, stable, and aligned with visible labels.
+
+Rules:
+
+- Visible control text should be part of the accessible name. This supports speech input users who say the visible label.
+- Do not use accessible names that differ meaningfully from visible labels.
+- Avoid redundant landmark labels such as `navigation navigation` or `main main`.
+- Avoid excessive ARIA labels that hide useful visible text.
+- Do not create multiple landmarks with the same vague label.
+- Make section labels specific: “Schedule”, “Judging criteria”, “Partner organizations”, not “Section”.
+- Avoid repeated identical links to different destinations.
+- If repeated links go to the same destination, make their context clear or consolidate them.
+- Use `aria-current="page"` or `aria-current="location"` only when true.
+
+Good speech-input-friendly pattern:
+
+```html
+<button type="button" aria-expanded="false" aria-controls="schedule-details">
+  Show schedule details
+</button>
+```
+
+Avoid:
+
+```html
+<button type="button" aria-label="Expand panel">Details</button>
+```
+
+## Error Prevention and Recovery
+
+Design for mistakes and uncertainty.
+
+Rules:
+
+- Make requirements visible before users submit forms.
+- For destructive actions, provide confirmation or undo.
+- Error messages must identify the field, explain the problem, and say how to fix it.
+- Move focus to an error summary after failed submission, then link to fields.
+- Preserve entered data after errors.
+- Avoid disabled submit buttons without explaining what is missing.
+- If a control is disabled, explain why or provide the requirement nearby.
+
+Error summary pattern:
+
+```html
+<div role="alert" tabindex="-1" class="error-summary">
+  <h2>Check the form</h2>
+  <p>There is 1 problem to fix.</p>
+  <ul>
+    <li><a href="#email">Enter a valid email address.</a></li>
+  </ul>
+</div>
+```
+
+## Personalization and User Preferences
+
+Respect user settings and avoid overriding browser defaults.
+
+Rules:
+
+- Respect `prefers-reduced-motion`.
+- Respect `prefers-color-scheme` when using dark/light themes, or provide a stable high-contrast default.
+- Support `forced-colors`.
+- Do not disable browser zoom.
+- Do not remove underlines from body links unless another strong non-color affordance exists.
+- Do not force custom scrollbars or cursor styles that reduce usability.
+- Do not block selection, copying, context menus, or browser translation.
 
 ## Content Preservation
 
@@ -107,6 +347,11 @@ Requirements:
 - Use `section aria-labelledby="..."` for major page sections.
 - Use `nav aria-label="..."` for navigation.
 - Keep all visible page content inside landmarks.
+- Ensure DOM reading order matches visual order.
+- Do not use CSS order, absolute positioning, or grid placement to create a visual order that differs from reading/focus order.
+- Set a correct `lang` on `<html>` when known.
+- Use a meaningful `<title>` that identifies the page purpose.
+- Do not disable zoom with viewport settings such as `user-scalable=no` or `maximum-scale=1`.
 
 Skip link pattern:
 
@@ -138,8 +383,11 @@ Requirements:
 - Use `max-width`, `%`, `rem`, `auto-fit`, `minmax()`, and flexible spacing.
 - Avoid fixed heights that clip text.
 - Preserve readability at 200% browser zoom.
+- Preserve readability and operation at 320 CSS px wide.
+- Support text spacing changes without clipping or overlap.
 - Keep important CTAs visible without relying on position alone.
 - Avoid dense multi-column layouts on narrow screens.
+- Avoid hover-only disclosure. Content available on hover must also be available on focus and touch.
 
 Preferred container pattern:
 
@@ -173,6 +421,8 @@ Requirements:
 - Avoid thin font weights for body text.
 - Keep line length comfortable with max-width.
 - Do not use text embedded in images as the only way to communicate information.
+- Do not prevent user text scaling.
+- Allow these user text spacing overrides without loss of content or functionality: line-height 1.5, paragraph spacing 2em, letter spacing 0.12em, word spacing 0.16em.
 
 Baseline CSS:
 
@@ -197,10 +447,12 @@ Requirements:
 
 - Normal text contrast: at least 4.5:1.
 - Large text contrast: at least 3:1.
+- Non-text UI contrast: at least 3:1 for controls, focus indicators, charts, and meaningful icons.
 - UI boundaries and focus indicators must be visually clear.
 - Do not communicate meaning through color alone.
 - Links must be visually distinguishable from surrounding text.
 - Error, success, warning, and status messages must include text, not only color.
+- Support forced colors/high contrast mode; do not remove outlines, borders, or currentColor-based affordances there.
 
 Safe default palette:
 
@@ -228,6 +480,10 @@ Requirements:
 - Use `:focus-visible`.
 - Focus must be visible against all backgrounds.
 - Focus must not be hidden behind sticky headers or overlays.
+- Focus order must follow reading order.
+- Focus must not move unexpectedly when content updates.
+- Any focusable element must be visible and operable.
+- Never put `aria-hidden="true"`, `inert`, or `display:none` on an element that contains focus.
 
 Preferred pattern:
 
@@ -263,6 +519,11 @@ Rules:
 - Avoid vague labels like “Click here”, “More”, “Submit”, or repeated “Learn more” without context.
 - If the original has a button with no JavaScript or form action, convert it to a link only when a relevant real URL exists.
 - If no action exists for a button, preserve the CTA visually only if it can be represented honestly, or omit it rather than creating an inaccessible dead control.
+- Set `type="button"` on non-submit buttons.
+- Touch/click targets should be at least 24 by 24 CSS px, preferably 44 by 44 CSS px for primary controls.
+- Do not require complex pointer gestures. Provide single-pointer alternatives for drag, swipe, pinch, or path gestures.
+- If an action can be triggered accidentally by pointer down, allow cancellation or trigger it on pointer up.
+- Do not open new tabs/windows without making that clear in the link text or accessible name.
 
 CTA pattern:
 
@@ -285,6 +546,11 @@ Requirements:
 - Error text is associated with `aria-describedby`.
 - Invalid fields use `aria-invalid="true"` when invalid.
 - Related radios and checkboxes use `fieldset` and `legend`.
+- Use appropriate input types and autocomplete tokens for common personal data.
+- Keep labels visible after input receives focus and after values are entered.
+- Error messages must explain how to fix the error.
+- Do not clear user-entered values after validation errors.
+- Preserve submitted data or provide confirmation before destructive actions.
 
 Input pattern:
 
@@ -318,6 +584,13 @@ Rules:
 - Spacer pixels and tracking images must be omitted.
 - Icons inside labelled controls should be hidden from assistive technology.
 - Do not rely on images to communicate text unless the same text is provided nearby.
+- Preserve brand logos, partner logos, product images, venue images, people images, charts, and diagrams when they are part of the source content.
+- Preserve image `src` values exactly when provided by extracted facts, especially long `data:` URIs.
+- Do not retype, summarize, regenerate, or alter base64/data URI image sources.
+- Verify each included image loads successfully and has non-zero rendered/natural dimensions.
+- Do not use `alt` text like “image”, “photo”, “logo” alone unless that is the complete useful meaning.
+- Avoid redundant alt text when adjacent text already names the same thing; use empty alt in that case.
+- For informative SVGs, provide an accessible name with `<title>` or `aria-label`; for decorative SVGs use `aria-hidden="true" focusable="false"`.
 
 Patterns:
 
@@ -401,6 +674,10 @@ If JavaScript is allowed:
 - Do not overuse live regions.
 - Manage focus after modal open, modal close, route change, and validation failure.
 - Keep ARIA state synchronized with visual state.
+- Prefer progressive enhancement; core content and links should remain understandable if JavaScript fails.
+- Do not hijack expected browser behavior for links, scrolling, forms, or keyboard shortcuts.
+- Use semantic disclosure controls (`button` with `aria-expanded`) for expandable regions.
+- Do not trap focus except inside an active modal/dialog, and restore focus when it closes.
 
 Status pattern:
 
@@ -418,6 +695,8 @@ Requirements:
 - No flashing more than 3 times per second.
 - No essential information conveyed only by animation.
 - Respect reduced motion.
+- Avoid autoplaying audio or video. If media autoplays, it must be muted and easy to pause.
+- Provide visible pause/stop controls for moving, blinking, scrolling, or auto-updating content that lasts more than 5 seconds.
 
 Pattern:
 
@@ -444,6 +723,8 @@ Requirements:
 - Use a list for multiple nav links.
 - Link text must be unique or clear in context.
 - Do not label navigation with vague text like “Learn more” unless that is truly the nav purpose.
+- Keep navigation consistent across generated pages or views.
+- Indicate the current page/section when useful with text, `aria-current`, or both.
 
 Pattern:
 
@@ -468,6 +749,46 @@ Footer may include:
 - copyright only if present in source or safe generic text is allowed
 
 Do not invent legal or organizational details.
+
+## ARIA Rules
+
+ARIA can repair semantics only when used correctly. Bad ARIA is worse than no ARIA.
+
+Rules:
+
+- Prefer native elements over custom roles.
+- Do not change native semantics unless necessary.
+- Every ARIA reference must point to an existing unique `id`.
+- Do not use duplicate IDs.
+- Do not use `role="button"` or `role="link"` on non-interactive elements unless keyboard behavior is fully implemented.
+- Do not put interactive controls inside other interactive controls.
+- For custom widgets, expose name, role, value, state, keyboard operation, and focus behavior.
+- Use `aria-labelledby` when visible text can name a region/control.
+- Use `aria-describedby` for supplemental help or error text, not primary labels.
+
+## Media and Downloads
+
+If media or downloadable documents are included:
+
+- Videos with speech need captions or an equivalent transcript.
+- Audio-only content needs a transcript.
+- Important visual-only video content needs a text alternative or audio description.
+- Download links must identify file type and purpose when known.
+- Do not embed inaccessible PDFs as the only source of important information.
+
+## Testing Expectations
+
+Before finishing, test the rendered result as a user would:
+
+- Load the final entrypoint in a browser.
+- Check desktop and mobile widths.
+- Tab through interactive elements in order.
+- Confirm focus is always visible.
+- Confirm images load and alt text is appropriate.
+- Confirm no horizontal overflow at mobile width.
+- Confirm heading order and landmarks.
+- Run available automated checks such as axe when possible.
+- Fix issues before returning.
 
 ## Accessible Redesign Defaults
 
@@ -700,24 +1021,35 @@ Better:
 
 Before returning the final result, verify silently:
 
-- Exactly one complete HTML document.
-- No markdown or code fences.
+- The requested final artifact/entrypoint exists and loads.
 - Correct `lang`.
 - Correct `<title>`.
 - One `<main>`.
 - One `<h1>`.
 - Header, labelled nav, main, labelled sections, and footer exist.
 - Skip link exists and targets main.
+- DOM reading order and focus order are logical.
 - All links have descriptive text.
 - No dead buttons.
 - All controls have visible focus states.
+- Touch targets are large enough.
+- Visible labels match or are included in accessible names.
+- There are no keyboard traps or hover-only interactions.
 - Body text is at least 16px.
 - Contrast is strong.
+- Non-text contrast is strong.
 - Layout works on mobile and at 200% zoom.
-- No JavaScript.
+- Text spacing changes would not clip or overlap content.
+- Forced-colors/high-contrast mode would preserve boundaries and focus.
+- Content is chunked, plain, and scannable.
+- Primary actions and next steps are clear.
+- No time pressure, autoplay, flashing, or unnecessary motion.
+- Errors, if any, explain recovery and preserve user input.
 - No iframe.
-- No external CSS or JS.
+- JavaScript, if used, preserves keyboard and screen-reader behavior.
 - No invented facts.
+- No exclusionary or ableist wording was added.
 - Real URLs are preserved.
-- Decorative or empty images are omitted or empty-alt.
+- Meaningful images are preserved and load successfully.
+- Decorative images are omitted or empty-alt.
 - All visible content is inside landmarks.
