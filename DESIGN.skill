@@ -155,6 +155,7 @@ Rules:
 - Avoid flashing, pulsing CTAs, and distracting loops.
 - Use consistent spacing, alignment, and visual grouping.
 - Use strong hierarchy without overwhelming contrast patterns.
+- Prefer calm, steady visual hierarchy over poster-like, brutalist, neon, glitch, or high-intensity treatments unless the original brand clearly depends on them.
 - Do not hide essential content behind hover-only reveals.
 - Let users control disclosure, expansion, media playback, and movement.
 - Prefer stable layouts; avoid layout shifts after load.
@@ -418,6 +419,8 @@ Requirements:
 - Prefer `rem` units.
 - Use comfortable line height, usually 1.5 to 1.7.
 - Avoid all-caps long text.
+- Do not uppercase headings, navigation, labels, or CTAs just for style; preserve original capitalization unless there is a clear brand reason.
+- Keep display type moderate. Avoid giant viewport-driven headings that dominate the page, crowd surrounding content, or become harder to read at zoom.
 - Avoid thin font weights for body text.
 - Keep line length comfortable with max-width.
 - Do not use text embedded in images as the only way to communicate information.

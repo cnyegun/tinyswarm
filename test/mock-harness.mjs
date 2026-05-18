@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = process.cwd();
-let app, source, harness, sessionRequest, writes = 0;
+let app, source, harness, sessionRequest, busyUntil = 0, writes = 0;
 
 const start = handler => new Promise(resolve => {
   const server = createServer(handler);
@@ -37,7 +37,17 @@ try {
       res.end(JSON.stringify({ id: "mock-session" }));
       return;
     }
-    if (req.method === "POST" && req.url.startsWith("/session/mock-session/message?")) {
+    if (req.method === "GET" && req.url.startsWith("/session/status?")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ "mock-session": { type: Date.now() < busyUntil ? "busy" : "idle" } }));
+      return;
+    }
+    if (req.method === "GET" && req.url.startsWith("/event?")) {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`);
+      return;
+    }
+    if (req.method === "POST" && req.url.startsWith("/session/mock-session/prompt_async?")) {
       const request = await body(req);
       const task = request.parts?.[0]?.text || "";
       const out = (task.split("Final entrypoint: ")[1] || task.split("Output file: ")[1])?.split("\n")[0]?.trim();
@@ -46,9 +56,9 @@ try {
       const html = writes === 1
         ? `<!doctype html><html lang="en"><head><title>Mock Rewrite</title></head><body><h1>Mock Event</h1><p>Initial draft intentionally misses main.</p></body></html>`
         : `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock Rewrite</title><style>body{margin:0;font:18px/1.6 Arial,sans-serif;color:#111;background:#fff}a:focus{outline:3px solid #111}main{max-width:70ch;margin:auto;padding:2rem}</style></head><body><header><nav aria-label="Primary"><a href="#main">Skip to content</a></nav></header><main id="main"><h1>Mock Event</h1><p>Accessible repaired page.</p><a href="/tickets">Get tickets for Mock Event</a></main><footer><p>Mock footer</p></footer></body></html>`;
-      writeFileSync(path, html);
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ info: { id: `message-${writes}` }, parts: [{ type: "text", text: `wrote ${out}` }] }));
+      busyUntil = Date.now() + 50;
+      setTimeout(() => writeFileSync(path, html), 10);
+      res.writeHead(204).end();
       return;
     }
     res.writeHead(404).end("not found");

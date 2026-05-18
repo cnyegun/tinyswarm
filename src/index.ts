@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { AxeBuilder } from "@axe-core/playwright";
-import { createOpencode, createOpencodeClient, type OpencodeClient, type Part, type PermissionRuleset } from "@opencode-ai/sdk/v2";
+import { createOpencode, createOpencodeClient, type OpencodeClient, type PermissionRuleset } from "@opencode-ai/sdk/v2";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { extname, join, relative, resolve } from "node:path";
@@ -47,10 +47,11 @@ const shown = (path: string) => `tiny-rewrite/${relative(rootDir, path)}`;
 const clip = (text = "", n = 500) => squash(text).slice(0, n);
 const harnessAgent = () => process.env.TINY_HARNESS_AGENT || "build";
 const harnessPermissions: PermissionRuleset = [{ permission: "*", pattern: "*", action: "allow" }];
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const harnessModel = () => {
-  const spec = process.env.TINY_HARNESS_MODEL || "deepseek/deepseek-v4-flash";
+  const spec = process.env.TINY_HARNESS_MODEL || "openai/gpt-5.5";
   const [providerID, ...modelParts] = spec.split("/");
-  return { providerID, modelID: modelParts.join("/"), variant: process.env.TINY_HARNESS_VARIANT || "max" };
+  return { providerID, modelID: modelParts.join("/"), variant: process.env.TINY_HARNESS_VARIANT || "low" };
 };
 
 async function main() {
@@ -71,14 +72,14 @@ async function main() {
     writeFileSync(join(runDir, "audit-brief.md"), auditBrief);
     log("artifact.write", "wrote scan artifacts", { runDir: shown(runDir) });
 
-    const task = buildHarnessTask(runDir, facts, false, []);
+    const task = withDesignPreservation(buildHarnessTask(runDir, facts, false, []));
     writeFileSync(join(runDir, "task.md"), task);
     log("task.build", "built harness task", { chars: task.length });
     await runHarness(join(runDir, "task.md"), runDir, "initial");
 
     let failures = await verifyTransformed(runDir, facts, "initial");
     if (failures.length) {
-      const repairTask = buildHarnessTask(runDir, facts, true, failures);
+      const repairTask = withDesignPreservation(buildHarnessTask(runDir, facts, true, failures));
       writeFileSync(join(runDir, "repair-task.md"), repairTask);
       log("task.build", "built one repair task", { chars: repairTask.length, failures: failures.length });
       await runHarness(join(runDir, "repair-task.md"), runDir, "repair");
@@ -182,13 +183,17 @@ function buildAuditBrief(facts: Facts, violations: Violation[]) {
     weakLinks ? "Ambiguous link names: replace vague repeated labels with descriptive text." : "Link names: keep CTAs descriptive and unique."
   ];
   const axe = violations.length ? violations.slice(0, 8).map(v => `- ${v.id} (${v.impact}): ${v.help}; targets: ${v.nodes.map(n => n.target).join(" | ")}`).join("\n") : "- No axe violations returned, but still redesign defensively.";
-  return `# Accessibility Audit Brief\n\n## Page Identity\n- Title: ${facts.title || h1}\n- URL: ${facts.url}\n- Main purpose: ${clip([h1, ...facts.textSnippets].join(" "), 220)}\n\n## Preserve\n- Brand/name: ${h1}\n- Primary CTAs: ${ctas.join("; ") || "None clearly extracted"}\n- Important links: ${links.join("; ") || "None clearly extracted"}\n- Core content sections: ${sections.join("; ") || "Use extracted body content"}\n\n## Problems Found\n${problems.map(p => `- ${p}`).join("\n")}\n\n## Axe Summary\n${axe}\n\n## Redesign Direction\n- Full accessible landing page redesign\n- High contrast\n- Clear responsive sections\n- Semantic header/nav/main/footer\n- Cards/lists for repeated content\n- Big readable type\n- Strong focus states\n- No motion dependency\n`;
+  return `# Accessibility Audit Brief\n\n## Page Identity\n- Title: ${facts.title || h1}\n- URL: ${facts.url}\n- Main purpose: ${clip([h1, ...facts.textSnippets].join(" "), 220)}\n\n## Preserve\n- Brand/name: ${h1}\n- Primary CTAs: ${ctas.join("; ") || "None clearly extracted"}\n- Important links: ${links.join("; ") || "None clearly extracted"}\n- Core content sections: ${sections.join("; ") || "Use extracted body content"}\n\n## Problems Found\n${problems.map(p => `- ${p}`).join("\n")}\n\n## Axe Summary\n${axe}\n\n## Redesign Direction\n- Full accessible landing page redesign\n- High contrast\n- Clear responsive sections\n- Semantic header/nav/main/footer\n- Cards/lists for repeated content\n- Calm readable type without oversized display text\n- Strong focus states\n- No motion dependency\n`;
 }
 
 function buildHarnessTask(runDir: string, facts: Facts, repair: boolean, failures: string[]) {
   const run = shown(runDir);
   const images = uniqueImages(facts).map((img, i) => `- ${i + 1}. ${img.alt}: ${describeSrc(img.src)}`).join("\n") || "- No meaningful images extracted.";
-  return `# Xcessible Agent Harness Task\n\nYou are the rewrite agent for a local accessibility demo. Use your tools to inspect the inputs and write the final artifact.\n\nWorking directory: ${rootDir}\nRun directory: ${run}\nFinal entrypoint: ${run}/transformed.html\n\nInputs:\n- DESIGN.skill\n- ${run}/original.html\n- ${run}/facts.json\n- ${run}/audit-brief.md\n\nGoal:\nCreate an accessible, high-quality redesigned version of the original page. Preserve the original brand, purpose, important content, CTAs, real links, brand imagery, and partner imagery. Redesign the page freely for accessibility, readability, visual quality, and responsive behavior.\n\nImplementation notes:\n- You may use whatever frontend technology is useful: HTML, CSS, JavaScript, TypeScript, Tailwind, build tooling, generated assets, or supporting files.\n- Keep ${run}/transformed.html as the final browser entrypoint. It may reference supporting files in ${run}.\n- Do not modify files outside ${run}. Do not modify the input artifacts.\n- Preserve every meaningful unique image from facts.json, especially brand and partner logos.\n- Copy image src values exactly from facts.json. Do not retype, shorten, regenerate, or alter data: URIs.\n- Use useful alt text, or empty alt only when nearby text already names the same brand.\n- Use semantic structure with one h1, clear landmarks, descriptive links, visible focus states, readable text, and responsive layouts.\n- Before finishing, run your own checks. If you create tooling, run install/build/test commands as appropriate. In all cases, verify the final entrypoint in a browser-like way and fix obvious issues before stopping.\n- Self-evaluate that every image loads with non-zero naturalWidth and naturalHeight.\n\nMeaningful unique images to preserve:\n${images}\n${repair ? `\nVerification failed after the first write. This is the only repair iteration for this run. Revise the generated files to address these failures, rerun your checks, then stop:\n${failures.map(f => `- ${f}`).join("\n")}\n` : ""}`;
+  return `# Xcessible Agent Harness Task\n\nYou are the rewrite agent for a local accessibility demo. Use your tools to inspect the inputs and write the final artifact.\n\nWorking directory: ${rootDir}\nRun directory: ${run}\nFinal entrypoint: ${run}/transformed.html\n\nInputs:\n- DESIGN.skill\n- ${run}/original.html\n- ${run}/facts.json\n- ${run}/audit-brief.md\n\nGoal:\nCreate an accessible, high-quality redesigned version of the original page. Preserve the original brand, purpose, important content, CTAs, real links, brand imagery, and partner imagery. Redesign the page freely for accessibility, readability, visual quality, and responsive behavior.\n\nImplementation notes:\n- You may use whatever frontend technology is useful: HTML, CSS, JavaScript, TypeScript, Tailwind, build tooling, generated assets, or supporting files.\n- Keep ${run}/transformed.html as the final browser entrypoint. It may reference supporting files in ${run}.\n- Do not modify files outside ${run}. Do not modify the input artifacts.\n- Preserve every meaningful unique image from facts.json, especially brand and partner logos.\n- Copy image src values exactly from facts.json. Do not retype, shorten, regenerate, or alter data: URIs.\n- Use useful alt text, or empty alt only when nearby text already names the same brand.\n- Use semantic structure with one h1, clear landmarks, descriptive links, visible focus states, readable text, and responsive layouts.\n- After writing transformed.html, do one quick self-check for obvious HTML/accessibility blockers, fix only blockers, then stop. Do not keep iterating after transformed.html exists.\n- Self-evaluate that every image loads with non-zero naturalWidth and naturalHeight.\n\nMeaningful unique images to preserve:\n${images}\n${repair ? `\nVerification failed after the first write. This is the only repair iteration for this run. Revise the generated files to address these failures, rerun your checks, then stop:\n${failures.map(f => `- ${f}`).join("\n")}\n` : ""}`;
+}
+
+function withDesignPreservation(task: string) {
+  return `${task}\n## Design Preservation Rules\nThese rules override any broad redesign wording above. Treat this as faithful accessible remediation, not a replacement design.\n\n- The finished page should feel like the same product/team shipped an inclusive update.\n- Preserve the original layout structure, section order, content hierarchy, imagery placement, spacing rhythm, and overall visual identity.\n- Do not convert the page into a generic landing page template.\n- Improve accessibility with the smallest visual changes that solve the issue: contrast, readable font size, line height, semantic HTML, keyboard focus states, responsive behavior, alt text, landmarks, and clearer link/button names.\n- Use a calm, readable visual hierarchy: prominent enough to scan, but not oversized or theatrical.\n- Avoid excessive all caps. Preserve source capitalization where it is part of the brand, but do not uppercase long headings, paragraphs, navigation, or repeated labels for style.\n- Keep display typography moderate and resilient at zoom: avoid giant viewport-driven type that dominates the page or crowds other content.\n- Favor steady, low-sensory polish over brutalist, neon, glitch, poster-like, or high-intensity treatments unless the original brand clearly requires them.\n- Preserve brand colors where possible; when a color fails contrast, choose the nearest accessible variant instead of inventing a new palette.\n- Preserve CTA intent and relative prominence.\n- Do not invent major new sections, claims, metrics, or decorative content unless needed to preserve context from the original.\n- Only restructure layout when the original structure directly harms accessibility, readability, or mobile usability.\n- Favor inclusive product polish over a dramatic redesign.\n`;
 }
 
 async function runHarness(taskFile: string, runDir: string, phase: string) {
@@ -198,21 +203,82 @@ async function runHarness(taskFile: string, runDir: string, phase: string) {
   const session = await ensureHarnessSession(active, runDir, harnessLog);
   const model = harnessModel();
   log("harness.run", `starting ${phase}`, { server: active.url, session, task: shown(taskFile), model: `${model.providerID}/${model.modelID}`, variant: model.variant });
-  appendFileSync(harnessLog, `\n# ${phase}\nSDK session.prompt ${active.url}\n`);
+  appendFileSync(harnessLog, `\n# ${phase}\nSDK session.promptAsync ${active.url}\n`);
   const stopApproving = startPermissionAutoApprove(active.client, session, harnessLog);
-  const result = await active.client.session.prompt({
-    sessionID: session,
-    directory: rootDir,
-    agent: harnessAgent(),
-    model: { providerID: model.providerID, modelID: model.modelID },
-    variant: model.variant,
-    parts: [{ type: "text", text: task }]
-  }).finally(stopApproving);
-  if (result.error) throw new Error(`opencode SDK prompt failed: ${describeError(result.error)}`);
-  const lines = (result.data.parts as Part[]).map(p => p.type === "text" ? `text: ${clip(p.text, 600)}` : p.type);
-  appendFileSync(harnessLog, lines.length ? `${lines.join("\n")}\n` : "No response parts returned.\n");
+  const stopEvents = startHarnessEventLog(active.client, session, harnessLog);
+  try {
+    const result = await active.client.session.promptAsync({
+      sessionID: session,
+      directory: rootDir,
+      agent: harnessAgent(),
+      model: { providerID: model.providerID, modelID: model.modelID },
+      variant: model.variant,
+      parts: [{ type: "text", text: task }]
+    });
+    if (result.error) throw new Error(`opencode SDK prompt_async failed: ${describeError(result.error)}`);
+    await waitForHarness(active.client, session, runDir, phase, harnessLog);
+  } finally {
+    stopApproving();
+    stopEvents();
+  }
   if (!existsSync(join(runDir, "transformed.html"))) throw new Error("Agent harness did not create transformed.html");
   log("harness.run", `finished ${phase}`);
+}
+
+async function waitForHarness(client: OpencodeClient, sessionID: string, runDir: string, phase: string, outFile: string) {
+  const timeoutMs = Number(process.env.TINY_HARNESS_RUN_TIMEOUT_MS || 900000);
+  const pollMs = Number(process.env.TINY_HARNESS_POLL_MS || 2000);
+  const heartbeatMs = Number(process.env.TINY_HARNESS_HEARTBEAT_MS || 15000);
+  const startedAt = Date.now();
+  let lastHeartbeat = 0, sawBusy = false, idleSince = 0, lastStatus = "unknown";
+  while (Date.now() - startedAt < timeoutMs) {
+    const status = await client.session.status({ directory: rootDir });
+    if (!status.error) {
+      const current = status.data?.[sessionID];
+      lastStatus = current?.type || "unknown";
+      if (lastStatus === "busy") { sawBusy = true; idleSince = 0; }
+      else if (!current && existsSync(join(runDir, "transformed.html"))) return;
+      else if (lastStatus === "idle") {
+        idleSince ||= Date.now();
+        if (existsSync(join(runDir, "transformed.html")) || sawBusy || Date.now() - idleSince > 3000) return;
+      } else if (lastStatus === "retry" && current && "message" in current) {
+        appendFileSync(outFile, `Retrying: ${current.message}\n`);
+      }
+    }
+    if (Date.now() - lastHeartbeat >= heartbeatMs) {
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      const transformed = existsSync(join(runDir, "transformed.html"));
+      log("harness.run", `${phase} still working`, { elapsed, status: lastStatus, transformed });
+      appendFileSync(outFile, `Still working: ${elapsed}s status=${lastStatus} transformed=${transformed}\n`);
+      lastHeartbeat = Date.now();
+    }
+    await sleep(pollMs);
+  }
+  if (existsSync(join(runDir, "transformed.html"))) {
+    log("harness.run", `${phase} timed out after artifact was written; continuing to verification`, { timeoutMs }, "WARN");
+    appendFileSync(outFile, `Timed out waiting for idle after ${timeoutMs}ms, but transformed.html exists.\n`);
+    return;
+  }
+  throw new Error(`Agent harness timed out after ${timeoutMs}ms`);
+}
+
+function startHarnessEventLog(client: OpencodeClient, sessionID: string, outFile: string) {
+  const controller = new AbortController();
+  void (async () => {
+    try {
+      const events = await client.event.subscribe({ directory: rootDir }, { signal: controller.signal, sseMaxRetryAttempts: 2 });
+      for await (const event of events.stream as AsyncIterable<Record<string, unknown>>) {
+        const payload = (event.payload || event) as { type?: string; properties?: Record<string, unknown> };
+        if (payload.properties?.sessionID !== sessionID) continue;
+        if (payload.type === "session.idle") appendFileSync(outFile, "Event: session idle\n");
+        else if (payload.type === "session.error") appendFileSync(outFile, `Event: session error ${describeError(payload.properties.error)}\n`);
+        else if (payload.type === "session.diff") appendFileSync(outFile, "Event: files changed\n");
+      }
+    } catch (e) {
+      if (!controller.signal.aborted) appendFileSync(outFile, `Event stream ended: ${describeError(e)}\n`);
+    }
+  })();
+  return () => controller.abort();
 }
 
 async function ensureHarness(outFile: string): Promise<Harness> {

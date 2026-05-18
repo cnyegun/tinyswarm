@@ -42,7 +42,7 @@ npm run tiny -- https://aaltoai-for-good.com/
 - Do not implement custom opencode HTTP clients.
 - Do not parse opencode SSE manually.
 - Use `@opencode-ai/sdk` for opencode server/client/session calls.
-- Default model is `deepseek/deepseek-v4-flash` with variant `max`.
+- Default model is `openai/gpt-5.5` with variant `low`.
 - Override with `TINY_HARNESS_MODEL=<provider>/<model>` and `TINY_HARNESS_VARIANT=<variant>`.
 - The harness may use any frontend technology and supporting files inside the run directory.
 - The harness owns creating and revising generated files, with `transformed.html` as the final entrypoint.
