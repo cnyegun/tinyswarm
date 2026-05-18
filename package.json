@@ -1,0 +1,23 @@
+{
+  "name": "tiny-rewrite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "tiny": "npm run build && node dist/index.js",
+    "test:mock": "npm run build && node test/mock-harness.mjs"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@opencode-ai/sdk": "^1.15.4",
+    "playwright": "^1.49.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
