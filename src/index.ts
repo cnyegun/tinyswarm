@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { AxeBuilder } from "@axe-core/playwright";
-import { createOpencode, createOpencodeClient, type OpencodeClient, type Part } from "@opencode-ai/sdk/v2";
+import { createOpencode, createOpencodeClient, type OpencodeClient, type Part, type PermissionRuleset } from "@opencode-ai/sdk/v2";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { extname, join, relative, resolve } from "node:path";
@@ -46,6 +46,7 @@ function log(scope: string, message: string, data?: unknown, level = "INFO") {
 const shown = (path: string) => `tiny-rewrite/${relative(rootDir, path)}`;
 const clip = (text = "", n = 500) => squash(text).slice(0, n);
 const harnessAgent = () => process.env.TINY_HARNESS_AGENT || "build";
+const harnessPermissions: PermissionRuleset = [{ permission: "*", pattern: "*", action: "allow" }];
 const harnessModel = () => {
   const spec = process.env.TINY_HARNESS_MODEL || "deepseek/deepseek-v4-flash";
   const [providerID, ...modelParts] = spec.split("/");
@@ -60,43 +61,46 @@ async function main() {
   logFile = join(runDir, "scan.log");
   started = Date.now();
 
-  const { originalHtml, facts, violations } = await loadOriginal(url);
-  const auditBrief = buildAuditBrief(facts, violations);
-  log("brief.build", "built audit brief", { bytes: auditBrief.length });
+  try {
+    const { originalHtml, facts, violations } = await loadOriginal(url);
+    const auditBrief = buildAuditBrief(facts, violations);
+    log("brief.build", "built audit brief", { bytes: auditBrief.length });
 
-  writeFileSync(join(runDir, "original.html"), originalHtml);
-  writeFileSync(join(runDir, "facts.json"), JSON.stringify(facts, null, 2));
-  writeFileSync(join(runDir, "audit-brief.md"), auditBrief);
-  log("artifact.write", "wrote scan artifacts", { runDir: shown(runDir) });
+    writeFileSync(join(runDir, "original.html"), originalHtml);
+    writeFileSync(join(runDir, "facts.json"), JSON.stringify(facts, null, 2));
+    writeFileSync(join(runDir, "audit-brief.md"), auditBrief);
+    log("artifact.write", "wrote scan artifacts", { runDir: shown(runDir) });
 
-  const task = buildHarnessTask(runDir, facts, false, []);
-  writeFileSync(join(runDir, "task.md"), task);
-  log("task.build", "built harness task", { chars: task.length });
-  await runHarness(join(runDir, "task.md"), runDir, "initial");
+    const task = buildHarnessTask(runDir, facts, false, []);
+    writeFileSync(join(runDir, "task.md"), task);
+    log("task.build", "built harness task", { chars: task.length });
+    await runHarness(join(runDir, "task.md"), runDir, "initial");
 
-  let failures = await verifyTransformed(runDir, facts, "initial");
-  if (failures.length) {
-    const repairTask = buildHarnessTask(runDir, facts, true, failures);
-    writeFileSync(join(runDir, "repair-task.md"), repairTask);
-    log("task.build", "built one repair task", { chars: repairTask.length, failures: failures.length });
-    await runHarness(join(runDir, "repair-task.md"), runDir, "repair");
-    failures = await verifyTransformed(runDir, facts, "final");
+    let failures = await verifyTransformed(runDir, facts, "initial");
+    if (failures.length) {
+      const repairTask = buildHarnessTask(runDir, facts, true, failures);
+      writeFileSync(join(runDir, "repair-task.md"), repairTask);
+      log("task.build", "built one repair task", { chars: repairTask.length, failures: failures.length });
+      await runHarness(join(runDir, "repair-task.md"), runDir, "repair");
+      failures = await verifyTransformed(runDir, facts, "final");
+    }
+    writeFileSync(join(runDir, "verification.md"), failures.length ? failures.map(f => `- ${f}`).join("\n") + "\n" : "No verification failures found.\n");
+    log("verify.run", failures.length ? "serving after one repair with remaining failures" : "verification passed", { failures: failures.length }, failures.length ? "WARN" : "INFO");
+
+    const { port } = await serve(runDir);
+    console.log(`Run: ${shown(runDir)}`);
+    console.log(`Original: ${shown(join(runDir, "original.html"))}`);
+    console.log(`Facts: ${shown(join(runDir, "facts.json"))}`);
+    console.log(`Audit brief: ${shown(join(runDir, "audit-brief.md"))}`);
+    console.log(`Task: ${shown(join(runDir, "task.md"))}`);
+    console.log(`Transformed: ${shown(join(runDir, "transformed.html"))}`);
+    console.log(`Verification: ${shown(join(runDir, "verification.md"))}`);
+    console.log(`Harness log: ${shown(join(runDir, "harness.log"))}`);
+    console.log(`Log: ${shown(join(runDir, "scan.log"))}`);
+    console.log(`Local: http://localhost:${port}`);
+  } finally {
+    closeHarness();
   }
-  closeHarness();
-  writeFileSync(join(runDir, "verification.md"), failures.length ? failures.map(f => `- ${f}`).join("\n") + "\n" : "No verification failures found.\n");
-  log("verify.run", failures.length ? "serving after one repair with remaining failures" : "verification passed", { failures: failures.length }, failures.length ? "WARN" : "INFO");
-
-  const { port } = await serve(runDir);
-  console.log(`Run: ${shown(runDir)}`);
-  console.log(`Original: ${shown(join(runDir, "original.html"))}`);
-  console.log(`Facts: ${shown(join(runDir, "facts.json"))}`);
-  console.log(`Audit brief: ${shown(join(runDir, "audit-brief.md"))}`);
-  console.log(`Task: ${shown(join(runDir, "task.md"))}`);
-  console.log(`Transformed: ${shown(join(runDir, "transformed.html"))}`);
-  console.log(`Verification: ${shown(join(runDir, "verification.md"))}`);
-  console.log(`Harness log: ${shown(join(runDir, "harness.log"))}`);
-  console.log(`Log: ${shown(join(runDir, "scan.log"))}`);
-  console.log(`Local: http://localhost:${port}`);
 }
 
 async function loadOriginal(url: string) {
@@ -195,6 +199,7 @@ async function runHarness(taskFile: string, runDir: string, phase: string) {
   const model = harnessModel();
   log("harness.run", `starting ${phase}`, { server: active.url, session, task: shown(taskFile), model: `${model.providerID}/${model.modelID}`, variant: model.variant });
   appendFileSync(harnessLog, `\n# ${phase}\nSDK session.prompt ${active.url}\n`);
+  const stopApproving = startPermissionAutoApprove(active.client, session, harnessLog);
   const result = await active.client.session.prompt({
     sessionID: session,
     directory: rootDir,
@@ -202,8 +207,8 @@ async function runHarness(taskFile: string, runDir: string, phase: string) {
     model: { providerID: model.providerID, modelID: model.modelID },
     variant: model.variant,
     parts: [{ type: "text", text: task }]
-  });
-  if (result.error) throw new Error(`opencode SDK prompt failed: ${JSON.stringify(result.error)}`);
+  }).finally(stopApproving);
+  if (result.error) throw new Error(`opencode SDK prompt failed: ${describeError(result.error)}`);
   const lines = (result.data.parts as Part[]).map(p => p.type === "text" ? `text: ${clip(p.text, 600)}` : p.type);
   appendFileSync(harnessLog, lines.length ? `${lines.join("\n")}\n` : "No response parts returned.\n");
   if (!existsSync(join(runDir, "transformed.html"))) throw new Error("Agent harness did not create transformed.html");
@@ -217,9 +222,14 @@ async function ensureHarness(outFile: string): Promise<Harness> {
     appendFileSync(outFile, `SDK client: ${harness.url}\n`);
     return harness;
   }
-  const started = await createOpencode({ hostname: "127.0.0.1", port: 0, timeout: Number(process.env.TINY_HARNESS_START_TIMEOUT_MS || 30000) });
+  const started = await createOpencode({
+    hostname: "127.0.0.1",
+    port: 0,
+    timeout: Number(process.env.TINY_HARNESS_START_TIMEOUT_MS || 30000),
+    config: { permission: "allow" }
+  });
   harness = { client: started.client, url: started.server.url, close: started.server.close };
-  appendFileSync(outFile, `SDK server: ${harness.url}\n`);
+  appendFileSync(outFile, `SDK server: ${harness.url}\nPermissions: allow\n`);
   return harness;
 }
 
@@ -230,12 +240,27 @@ async function ensureHarnessSession(active: Harness, runDir: string, outFile: st
     directory: rootDir,
     title: `tiny rewrite ${relative(rootDir, runDir)}`,
     agent: harnessAgent(),
-    model: { providerID: model.providerID, id: model.modelID, variant: model.variant }
+    model: { providerID: model.providerID, id: model.modelID, variant: model.variant },
+    permission: harnessPermissions
   });
-  if (result.error) throw new Error(`opencode SDK session create failed: ${JSON.stringify(result.error)}`);
+  if (result.error) throw new Error(`opencode SDK session create failed: ${describeError(result.error)}`);
   harnessSessionID = result.data.id;
   appendFileSync(outFile, `Session: ${harnessSessionID}\n`);
   return harnessSessionID;
+}
+
+function startPermissionAutoApprove(client: OpencodeClient, sessionID: string, outFile: string) {
+  const approve = async () => {
+    const pending = await client.permission.list({ directory: rootDir });
+    if (pending.error) return;
+    for (const request of (pending.data || []).filter(r => r.sessionID === sessionID)) {
+      appendFileSync(outFile, `Auto-allowed permission: ${request.permission} ${request.patterns.join(", ")}\n`);
+      await client.permission.reply({ requestID: request.id, directory: rootDir, reply: "always" });
+    }
+  };
+  const timer = setInterval(() => { void approve().catch(() => undefined); }, 1000);
+  void approve().catch(() => undefined);
+  return () => clearInterval(timer);
 }
 
 function closeHarness() {
@@ -355,6 +380,13 @@ function uniqueImages(facts: Facts) {
 
 function describeSrc(src: string) {
   return src.startsWith("data:") ? `${src.slice(0, 32)}... (${src.length} chars)` : src;
+}
+
+function describeError(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (!error || typeof error !== "object") return String(error);
+  try { return JSON.stringify(error, Object.getOwnPropertyNames(error)); }
+  catch { return String(error); }
 }
 
 main().catch(e => { log("fatal", e instanceof Error ? e.message : String(e), undefined, "ERROR"); process.exit(1); });

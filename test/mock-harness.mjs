@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = process.cwd();
-let app, source, harness, writes = 0;
+let app, source, harness, sessionRequest, writes = 0;
 
 const start = handler => new Promise(resolve => {
   const server = createServer(handler);
@@ -32,7 +32,7 @@ try {
       return;
     }
     if (req.method === "POST" && req.url.startsWith("/session?")) {
-      await body(req);
+      sessionRequest = await body(req);
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ id: "mock-session" }));
       return;
@@ -75,6 +75,7 @@ try {
   const harnessLog = await fetch(`${local}/harness.log`).then(r => r.text());
   const transformedPath = stdout.match(/Transformed: (tiny-rewrite\/\S+)/)?.[1];
   const transformedFile = transformedPath && readFileSync(join(root, transformedPath.replace("tiny-rewrite/", "")), "utf8");
+  if (!sessionRequest?.permission?.some(rule => rule.permission === "*" && rule.pattern === "*" && rule.action === "allow")) throw new Error("harness session did not request allow-all permissions");
   if (!transformedFile?.includes("Accessible repaired page")) throw new Error("transformed.html did not contain repaired output");
   if (!html.includes("Accessible repaired page")) throw new Error("local server did not serve transformed output");
   if (!verification.includes("No verification failures")) throw new Error(`verification did not pass\n${verification}`);
