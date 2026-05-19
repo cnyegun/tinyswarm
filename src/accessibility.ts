@@ -103,6 +103,7 @@ solver-task.md should tell the fixer exactly what to change and what not to chan
 - Allowed removals: only the Lovable badge, purely decorative duplicated content, empty wrappers, or duplicate inaccessible controls when an accessible equivalent remains. Require a short justification for each removal.
 - Must-fix accessibility items: list each supported issue with evidence, affected element/section, user impact, and acceptance criteria.
 - Faithful remediation constraints: prefer semantic HTML, corrected names/labels/alt text, contrast/focus/reflow CSS, and small structural repairs over wholesale redesign. Do not replace the page with a generic hero/features/testimonials/contact template. Do not rewrite CTAs into vague labels. Do not drop links or images to make axe pass.
+- Color/theme repair guardrail: treat background, foreground, muted, accent, link, and CTA/button colors as a paired system. If a task changes dark/light background utilities, also require matching foreground utilities, slash-opacity variants, bg-background opacity variants, body background, and default anchor/CTA colors so computed contrast passes. Do not accept token-name fixes without computed foreground/background contrast evidence.
 - Acceptance criteria: valid standalone HTML, title, exactly one h1, main landmark, no axe violations, no mobile horizontal overflow, visible focus styles, responsive layout, improved accessibility score, preserved key content and identity, no unsupported removals.
 - Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, preservationNotes, removedContent, and residualRisks if useful, while remaining simple JSON.
 
@@ -121,6 +122,7 @@ Hard constraints:
 - Do not create a generic hero/features/testimonials/contact page. Do not replace specific event or organization content with vague marketing filler. Do not invent new dates, sponsors, judging criteria, links, or claims.
 - Only remove the Lovable badge, purely decorative duplicated content, empty wrappers, or duplicate inaccessible controls when an accessible equivalent remains and the removal is justified in solver-result.json.
 - Passing axe is required but not sufficient. Also preserve content and improve human accessibility.
+- Color fixes must repair the whole computed color system, not a single class. If restoring or changing backgrounds, also verify and fix body/html background, text-foreground, text-foreground slash-opacity variants, text-muted-foreground, accent text, bg-background slash-opacity variants, default anchors, and CTA/button foreground/background colors.
 
 Required accessibility baseline:
 - Meaningful title, page language when known, exactly one h1, main landmark, sensible landmarks/sections, logical heading hierarchy, and DOM order matching visual/reading order.
@@ -132,6 +134,7 @@ Required accessibility baseline:
 Implementation guidance:
 - Start from original.html or the best prior transformed.html only if it preserved the original well. If prior output became generic or lost content, rebuild from original.html and apply targeted fixes.
 - Make the smallest effective changes for each supported finding. Keep original assets and hrefs unless broken or inaccessible with no safe repair.
+- When adding CSS overrides for Tailwind-like classes that contain slash opacity, escape the slash in selectors and cover every used variant in transformed.html; examples include text-foreground/60 and bg-background/85.
 - If an issue is uncertain and changing it risks content loss or false claims, preserve the original and record the residual risk.
 - Ensure transformed.html can be served directly from the run directory without external build steps.
 
@@ -173,6 +176,7 @@ Decision rules:
 - checksPass must reflect checks.json, not reviewer optimism.
 - Use accept only when checks pass, there are no block votes, reviewers mostly accept, accessibility is materially improved, and preservation is acceptable against the brief and solver-task.
 - Use continue when checks fail, important findings remain fixable, reviewers request revise, or the candidate passes axe but still drops content, loses links/images, flattens brand identity, has ambiguous CTAs, or looks like a generic page.
+- Treat failed axe color-contrast as fixable after a color/theme change unless the failure has already persisted through a targeted color-repair iteration or the run has exhausted its iteration budget.
 - Use stop_with_risks only when further iterations are unlikely to improve within this run, and explain the residual risks clearly.
 - If the transformed page appears worse than original or destructive, prefer continue unless retry limits or repeated failures make stop_with_risks more honest.
 
@@ -208,7 +212,7 @@ async function scan(url: string, { runDir }: { runDir: string }) {
     const facts = await extractFacts(page);
     const axe = await new AxeBuilder({ page }).analyze();
     await page.screenshot({ path: join(runDir, "screenshots", "original.png"), fullPage: true });
-    writeFileSync(join(runDir, "original.html"), await page.content());
+    writeFileSync(join(runDir, "original.html"), absolutizeHtmlResources(await page.content(), page.url()));
     writeFileSync(join(runDir, "facts.json"), JSON.stringify(facts, null, 2));
     writeFileSync(join(runDir, "axe.json"), JSON.stringify(axe, null, 2));
   } finally {
@@ -245,6 +249,7 @@ async function check({ runDir }: { runDir: string }, iteration: number): Promise
   const failures: string[] = [];
   const htmlPath = join(runDir, "transformed.html");
   if (!existsSync(htmlPath)) failures.push("transformed.html missing");
+  else normalizeHtmlFile(htmlPath, originalUrl(runDir));
   const preview = await serve(runDir, 0);
   const browser = await chromium.launch();
   let dom = { title: "", h1: 0, main: false };
@@ -271,6 +276,42 @@ async function check({ runDir }: { runDir: string }, iteration: number): Promise
     preview.server.close();
   }
   return { passed: failures.length === 0, failures, title: dom.title, h1: dom.h1, main: dom.main, mobileOverflow, axeViolations };
+}
+
+function normalizeHtmlFile(file: string, baseUrl: string) {
+  if (!baseUrl) return;
+  const html = readFileSync(file, "utf8");
+  const normalized = absolutizeHtmlResources(html, baseUrl);
+  if (normalized !== html) writeFileSync(file, normalized);
+}
+
+function originalUrl(runDir: string) {
+  try {
+    const facts = JSON.parse(readFileSync(join(runDir, "facts.json"), "utf8")) as { url?: unknown };
+    return typeof facts.url === "string" ? facts.url : "";
+  } catch {
+    return "";
+  }
+}
+
+function absolutizeHtmlResources(html: string, baseUrl: string) {
+  return html
+    .replace(/(\s(?:href|src)=)(["'])([^"']*)\2/gi, (_match, prefix: string, quote: string, value: string) => `${prefix}${quote}${absolutizeUrl(value, baseUrl)}${quote}`)
+    .replace(/(\ssrcset=)(["'])([^"']*)\2/gi, (_match, prefix: string, quote: string, value: string) => `${prefix}${quote}${absolutizeSrcset(value, baseUrl)}${quote}`)
+    .replace(/url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi, (_match, quote: string, value: string) => `url(${quote}${absolutizeUrl(value, baseUrl)}${quote})`);
+}
+
+function absolutizeSrcset(value: string, baseUrl: string) {
+  return value.split(",").map(candidate => {
+    const trimmed = candidate.trim();
+    const [url, ...descriptor] = trimmed.split(/\s+/);
+    return [absolutizeUrl(url, baseUrl), ...descriptor].join(" ");
+  }).join(", ");
+}
+
+function absolutizeUrl(value: string, baseUrl: string) {
+  if (!value.startsWith("/") || value.startsWith("//")) return value;
+  try { return new URL(value, baseUrl).href; } catch { return value; }
 }
 
 async function serve(runDir: string, preferredPort: number) {
