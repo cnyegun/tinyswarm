@@ -25,8 +25,23 @@ const body = req => new Promise(resolve => {
 
 try {
   source = await start((req, res) => {
+    if (req.url === "/assets/mock.css") {
+      res.setHeader("content-type", "text/css; charset=utf-8");
+      res.end("body{font-family:Arial,sans-serif} img{max-width:100%}");
+      return;
+    }
+    if (req.url === "/assets/mock.js") {
+      res.setHeader("content-type", "text/javascript; charset=utf-8");
+      res.end("document.documentElement.dataset.mock='loaded';");
+      return;
+    }
+    if (req.url === "/assets/logo.svg") {
+      res.setHeader("content-type", "image/svg+xml");
+      res.end("<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><title>Mock logo</title><rect width='24' height='24' fill='black'/></svg>");
+      return;
+    }
     res.setHeader("content-type", "text/html; charset=utf-8");
-    res.end(`<!doctype html><html lang="en"><head><title>Mock Event</title></head><body><header><nav><a href="/tickets">Learn more</a></nav></header><h1>Mock Event</h1><p>Join a practical accessibility event for builders and designers.</p><button>Register</button></body></html>`);
+    res.end(`<!doctype html><html lang="en"><head><title>Mock Event</title><link rel="stylesheet" href="/assets/mock.css"><script type="module" src="/assets/mock.js"></script></head><body><header><nav><a href="/tickets">Learn more</a></nav></header><h1>Mock Event</h1><img src="/assets/logo.svg" alt="Mock logo"><p>Join a practical accessibility event for builders and designers.</p><button>Register</button></body></html>`);
   });
 
   opencode = await start(async (req, res) => {
@@ -57,7 +72,7 @@ try {
       res.end(JSON.stringify([]));
       return;
     }
-    const promptMatch = req.method === "POST" && req.url.match(/^\/session\/([^/]+)\/message\?/);
+    const promptMatch = req.method === "POST" && req.url.match(/^\/session\/([^/]+)\/(?:message|prompt_async)\?/);
     if (promptMatch) {
       const request = await body(req);
       const text = request.parts?.[0]?.text || "";
@@ -90,12 +105,17 @@ try {
   const runPath = stdout.match(/Run: (runs\/\S+)/)?.[1];
   if (!runPath) throw new Error(`missing run path\n${stdout}`);
   const runDir = join(root, runPath);
+  const sourceOrigin = `http://127.0.0.1:${port(source)}`;
+  const original = readFileSync(join(runDir, "original.html"), "utf8");
   const transformed = readFileSync(join(runDir, "transformed.html"), "utf8");
   const decision = JSON.parse(readFileSync(join(runDir, "iterations", "002", "decision.json"), "utf8"));
   const checks = await fetch(`${local}/checks.json`).then(r => r.json());
   const report = await fetch(`${local}/report.html`).then(r => r.text());
   const brief = await fetch(`${local}/brief.md`).then(r => r.text());
   if (!transformed.includes("Accessible repaired page")) throw new Error("transformed.html did not contain final mock output");
+  if (!original.includes(`${sourceOrigin}/assets/mock.css`)) throw new Error("original.html did not absolutize stylesheet URL");
+  if (!original.includes(`${sourceOrigin}/assets/mock.js`)) throw new Error("original.html did not absolutize script URL");
+  if (!original.includes(`${sourceOrigin}/assets/logo.svg`)) throw new Error("original.html did not absolutize image URL");
   if (!checks.passed) throw new Error(`latest checks did not pass: ${JSON.stringify(checks.failures)}`);
   if (decision.outcome !== "accept") throw new Error(`expected accept decision, got ${decision.outcome}`);
   if (!report.includes("Mock swarm report")) throw new Error("report.html was not served");
@@ -104,6 +124,8 @@ try {
   if (!prompts.some(p => p.text.includes("Output:") && p.text.includes("brief.md"))) throw new Error("brief prompt missing");
   if (prompts.filter(p => p.text.includes("Output:") && p.text.includes("findings/")).length !== 8) throw new Error("reviewer findings did not run every iteration");
   if (new Set(prompts.filter(p => p.text.includes("swarm orchestrator")).map(p => p.sessionID)).size !== 1) throw new Error("orchestrator session was not reused");
+  if (!prompts.some(p => p.text.includes("Color/theme repair guardrail") && p.text.includes("bg-background opacity variants"))) throw new Error("aggregate prompt missing color guardrail");
+  if (!prompts.some(p => p.text.includes("Color fixes must repair the whole computed color system") && p.text.includes("bg-background/85"))) throw new Error("fix prompt missing color guardrail");
   if (!existsSync(join(runDir, "prompts", "brief.md"))) throw new Error("brief prompt was not saved");
   if (!existsSync(join(runDir, "iterations", "001", "prompts", "fix.md"))) throw new Error("fix prompt was not saved");
   if (!existsSync(join(runDir, "prompts", "report.md"))) throw new Error("report prompt was not saved");
