@@ -144,3 +144,6 @@ runs/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Other files
+research-arxiv-2507-19549v1.md
