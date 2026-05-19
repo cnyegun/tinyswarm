@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { mkdirSync } from "node:fs";
 
 const root = process.cwd();
-let app, source, harness, sessionRequest, busyUntil = 0, writes = 0;
+let app, source, opencode;
+let sessionCount = 0;
+const sessions = new Map();
+const prompts = [];
 
 const start = handler => new Promise(resolve => {
   const server = createServer(handler);
@@ -22,77 +26,147 @@ const body = req => new Promise(resolve => {
 try {
   source = await start((req, res) => {
     res.setHeader("content-type", "text/html; charset=utf-8");
-    res.end(`<!doctype html><html lang="en"><head><title>Mock Event</title></head><body><nav><a href="/tickets">Learn more</a></nav><h1>Mock Event</h1><p>Join a practical accessibility event for builders and designers.</p><button>Register</button><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""></body></html>`);
+    res.end(`<!doctype html><html lang="en"><head><title>Mock Event</title></head><body><header><nav><a href="/tickets">Learn more</a></nav></header><h1>Mock Event</h1><p>Join a practical accessibility event for builders and designers.</p><button>Register</button></body></html>`);
   });
 
-  harness = await start(async (req, res) => {
+  opencode = await start(async (req, res) => {
     if (req.method === "GET" && req.url === "/global/health") {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ healthy: true, version: "mock" }));
       return;
     }
     if (req.method === "POST" && req.url.startsWith("/session?")) {
-      sessionRequest = await body(req);
+      const request = await body(req);
+      if (!request.permission?.some(rule => rule.permission === "*" && rule.pattern === "*" && rule.action === "allow")) {
+        res.writeHead(400).end(JSON.stringify({ error: "missing allow-all" }));
+        return;
+      }
+      const id = `mock-session-${++sessionCount}`;
+      sessions.set(id, request.title || id);
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ id: "mock-session" }));
+      res.end(JSON.stringify({ id, title: request.title || id, time: { created: Date.now(), updated: Date.now() }, directory: root, projectID: "mock", version: "mock" }));
       return;
     }
     if (req.method === "GET" && req.url.startsWith("/session/status?")) {
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ "mock-session": { type: Date.now() < busyUntil ? "busy" : "idle" } }));
+      res.end(JSON.stringify(Object.fromEntries([...sessions.keys()].map(id => [id, { type: "idle" }]))));
       return;
     }
-    if (req.method === "GET" && req.url.startsWith("/event?")) {
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      res.write(`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`);
+    if (req.method === "GET" && req.url.includes("/message")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify([]));
       return;
     }
-    if (req.method === "POST" && req.url.startsWith("/session/mock-session/prompt_async?")) {
+    const promptMatch = req.method === "POST" && req.url.match(/^\/session\/([^/]+)\/message\?/);
+    if (promptMatch) {
       const request = await body(req);
-      const task = request.parts?.[0]?.text || "";
-      const out = (task.split("Final entrypoint: ")[1] || task.split("Output file: ")[1])?.split("\n")[0]?.trim();
-      const path = join(root, out.replace("tiny-rewrite/", ""));
-      writes++;
-      const html = writes === 1
-        ? `<!doctype html><html lang="en"><head><title>Mock Rewrite</title></head><body><h1>Mock Event</h1><p>Initial draft intentionally misses main.</p></body></html>`
-        : `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock Rewrite</title><style>body{margin:0;font:18px/1.6 Arial,sans-serif;color:#111;background:#fff}a:focus{outline:3px solid #111}main{max-width:70ch;margin:auto;padding:2rem}</style></head><body><header><nav aria-label="Primary"><a href="#main">Skip to content</a></nav></header><main id="main"><h1>Mock Event</h1><p>Accessible repaired page.</p><a href="/tickets">Get tickets for Mock Event</a></main><footer><p>Mock footer</p></footer></body></html>`;
-      busyUntil = Date.now() + 50;
-      setTimeout(() => writeFileSync(path, html), 10);
-      res.writeHead(204).end();
+      const text = request.parts?.[0]?.text || "";
+      prompts.push({ sessionID: promptMatch[1], text });
+      await writeMockOutput(text);
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ id: `message-${prompts.length}`, sessionID: promptMatch[1], role: "assistant", parts: [], time: { created: Date.now() } }));
       return;
     }
     res.writeHead(404).end("not found");
   });
 
-  app = spawn(process.execPath, ["dist/index.js", `http://127.0.0.1:${port(source)}/`], {
+  app = spawn(process.execPath, ["dist/index.js", "accessibility", `http://127.0.0.1:${port(source)}/`], {
     cwd: root,
-    env: { ...process.env, TINY_OPENCODE_SERVER_URL: `http://127.0.0.1:${port(harness)}` },
+    env: { ...process.env, SWARM_OPENCODE_SERVER_URL: `http://127.0.0.1:${port(opencode)}`, SWARM_MAX_ITERATIONS: "2", SWARM_AGENT_TIMEOUT_MS: "10000" },
     stdio: ["ignore", "pipe", "pipe"]
   });
   let stdout = "", stderr = "";
   app.stderr.on("data", d => { stderr += d; });
   const local = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timed out waiting for Local URL\n${stdout}\n${stderr}`)), 30000);
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for Local URL\n${stdout}\n${stderr}`)), 45000);
     app.stdout.on("data", d => {
       stdout += d;
-      const match = stdout.match(/Local: (http:\/\/localhost:\d+)/);
+      const match = stdout.match(/Local: (http:\/\/localhost:\d+)/) || stdout.match(/Local: (http:\/\/127\.0\.0\.1:\d+)/);
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
     app.once("exit", code => reject(new Error(`app exited ${code}\n${stdout}\n${stderr}`)));
   });
-  const html = await fetch(local).then(r => r.text());
-  const verification = await fetch(`${local}/verification.md`).then(r => r.text());
-  const harnessLog = await fetch(`${local}/harness.log`).then(r => r.text());
-  const transformedPath = stdout.match(/Transformed: (tiny-rewrite\/\S+)/)?.[1];
-  const transformedFile = transformedPath && readFileSync(join(root, transformedPath.replace("tiny-rewrite/", "")), "utf8");
-  if (!sessionRequest?.permission?.some(rule => rule.permission === "*" && rule.pattern === "*" && rule.action === "allow")) throw new Error("harness session did not request allow-all permissions");
-  if (!transformedFile?.includes("Accessible repaired page")) throw new Error("transformed.html did not contain repaired output");
-  if (!html.includes("Accessible repaired page")) throw new Error("local server did not serve transformed output");
-  if (!verification.includes("No verification failures")) throw new Error(`verification did not pass\n${verification}`);
-  if (!harnessLog.includes("# initial") || !harnessLog.includes("# repair")) throw new Error("harness did not run initial and repair phases");
-  console.log(`mock SDK harness test passed: ${local}`);
+
+  const runPath = stdout.match(/Run: (runs\/\S+)/)?.[1];
+  if (!runPath) throw new Error(`missing run path\n${stdout}`);
+  const runDir = join(root, runPath);
+  const transformed = readFileSync(join(runDir, "transformed.html"), "utf8");
+  const decision = JSON.parse(readFileSync(join(runDir, "iterations", "002", "decision.json"), "utf8"));
+  const checks = await fetch(`${local}/checks.json`).then(r => r.json());
+  const report = await fetch(`${local}/report.html`).then(r => r.text());
+  const brief = await fetch(`${local}/brief.md`).then(r => r.text());
+  if (!transformed.includes("Accessible repaired page")) throw new Error("transformed.html did not contain final mock output");
+  if (!checks.passed) throw new Error(`latest checks did not pass: ${JSON.stringify(checks.failures)}`);
+  if (decision.outcome !== "accept") throw new Error(`expected accept decision, got ${decision.outcome}`);
+  if (!report.includes("Mock swarm report")) throw new Error("report.html was not served");
+  if (!brief.includes("Mock accessibility brief")) throw new Error("brief.md was not served");
+  if (sessionCount !== 6) throw new Error(`expected 6 reused sessions, got ${sessionCount}`);
+  if (!prompts.some(p => p.text.includes("Output:") && p.text.includes("brief.md"))) throw new Error("brief prompt missing");
+  if (prompts.filter(p => p.text.includes("Output:") && p.text.includes("findings/")).length !== 8) throw new Error("reviewer findings did not run every iteration");
+  if (new Set(prompts.filter(p => p.text.includes("swarm orchestrator")).map(p => p.sessionID)).size !== 1) throw new Error("orchestrator session was not reused");
+  if (!existsSync(join(runDir, "prompts", "brief.md"))) throw new Error("brief prompt was not saved");
+  if (!existsSync(join(runDir, "iterations", "001", "prompts", "fix.md"))) throw new Error("fix prompt was not saved");
+  if (!existsSync(join(runDir, "prompts", "report.md"))) throw new Error("report prompt was not saved");
+  console.log(`mock swarm test passed: ${local}`);
 } finally {
-  if (app) { app.kill("SIGTERM"); await Promise.race([once(app, "exit"), new Promise(r => setTimeout(r, 1000))]); }
+  if (app) {
+    app.kill("SIGTERM");
+    await Promise.race([once(app, "exit"), new Promise(resolve => setTimeout(resolve, 1000))]);
+  }
   await close(source);
-  await close(harness);
+  await close(opencode);
+}
+
+async function writeMockOutput(prompt) {
+  const outputs = [...prompt.matchAll(/(?:Output|Outputs):[^\S\n]*([^\n]+)/g)].map(m => m[1].trim()).filter(p => p && !p.startsWith("- "));
+  for (const line of prompt.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("- /") || trimmed.startsWith("- ./")) outputs.push(trimmed.slice(2));
+  }
+  if (outputs.some(p => p.endsWith("report.md"))) {
+    write(outputs.find(p => p.endsWith("report.md")), "# Mock swarm report\n\nAccepted.\n");
+    write(outputs.find(p => p.endsWith("report.html")), "<!doctype html><html lang=\"en\"><head><title>Mock swarm report</title></head><body><main><h1>Mock swarm report</h1><a href=\"/\">Transformed</a></main></body></html>");
+  }
+  else if (outputs.some(p => p.endsWith("decision.json"))) write(outputs[0], decision(prompt));
+  else if (outputs.some(p => p.includes("/votes/"))) write(outputs[0], vote(prompt));
+  else if (outputs.some(p => p.endsWith("transformed.html"))) {
+    write(outputs.find(p => p.endsWith("transformed.html")), html(prompt.includes("iteration 1")));
+    write(outputs.find(p => p.endsWith("solver-result.json")), JSON.stringify({ changed: true, summary: "mock fix applied" }, null, 2));
+  }
+  else if (outputs.some(p => p.endsWith("aggregate-feedback.json"))) {
+    write(outputs.find(p => p.endsWith("aggregate-feedback.json")), JSON.stringify({ summary: "mock feedback", priorities: ["fix landmarks"], risks: [] }, null, 2));
+    write(outputs.find(p => p.endsWith("solver-task.md")), "# Solver task\n\nFix landmarks, title, and mobile layout.\n");
+  }
+  else if (outputs.some(p => p.includes("/findings/"))) write(outputs[0], finding(outputs[0]));
+  else if (outputs.some(p => p.endsWith("brief.md"))) write(outputs.find(p => p.endsWith("brief.md")), "# Mock accessibility brief\n\nReview the page.\n");
+}
+
+function html(broken) {
+  if (broken) return `<!doctype html><html lang="en"><head><title>Mock Rewrite</title></head><body><h1>Mock Event</h1><p>Initial draft intentionally misses main.</p></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock Rewrite</title><style>body{margin:0;font:18px/1.6 Arial,sans-serif;color:#111;background:#fff}a:focus,button:focus{outline:3px solid #111;outline-offset:3px}main{max-width:70ch;margin:auto;padding:2rem}a{color:#0645ad}</style></head><body><header><nav aria-label="Primary"><a href="#main">Skip to content</a></nav></header><main id="main"><h1>Mock Event</h1><p>Accessible repaired page for builders and designers.</p><a href="/tickets">Get tickets for Mock Event</a></main><footer><p>Mock footer</p></footer></body></html>`;
+}
+
+function vote(prompt) {
+  const checksPath = prompt.match(/Read transformed\.html, ([^,]+checks\.json)/)?.[1];
+  const checks = checksPath && existsSync(checksPath) ? JSON.parse(readFileSync(checksPath, "utf8")) : { passed: false };
+  return JSON.stringify({ vote: checks.passed ? "accept" : "revise", score: checks.passed ? 95 : 40, reason: checks.passed ? "passes mock checks" : "needs repair" }, null, 2);
+}
+
+function finding(path) {
+  const role = path.match(/findings\/([^/]+)\.json$/)?.[1] || "reviewer";
+  return JSON.stringify({ role, findings: [`${role} mock finding`], risk: "medium" }, null, 2);
+}
+
+function decision(prompt) {
+  const iterDir = prompt.match(/Read ([^\n]+)checks\.json/)?.[1];
+  const checksPath = iterDir && `${iterDir}checks.json`;
+  const checks = checksPath && existsSync(checksPath) ? JSON.parse(readFileSync(checksPath, "utf8")) : { passed: false };
+  const accepts = checks.passed ? 4 : 0;
+  return JSON.stringify({ outcome: checks.passed ? "accept" : "continue", reason: checks.passed ? "passes mock checks" : "needs another iteration", checksPass: checks.passed, accepts, blocks: 0 }, null, 2);
+}
+
+function write(path, content) {
+  if (!path) throw new Error("mock prompt did not include output path");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
 }

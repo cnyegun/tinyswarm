@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "swarm": "npm run build && node dist/index.js",
     "tiny": "npm run build && node dist/index.js",
     "test:mock": "npm run build && node test/mock-harness.mjs"
   },

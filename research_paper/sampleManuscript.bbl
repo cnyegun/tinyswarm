@@ -1,0 +1,565 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{60}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{} and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showURL}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showURL #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[{AChecker: IDI Accessibility}({[n.\,d.]})]%
+        {achecker2024}
+\bibfield{author}{\bibinfo{person}{{AChecker: IDI Accessibility}}.} \bibinfo{year}{[n.\,d.]}\natexlab{}.
+\newblock \bibinfo{title}{AChecker: IDI Accessibility}.
+\newblock \bibinfo{howpublished}{\url{http://www.atutor.ca/achecker/}}.
+\newblock
+\newblock
+\shownote{Retrieved 25-06-2024}.
+
+
+\bibitem[Acosta-Vargas et~al\mbox{.}(2020)]%
+        {acosta2020dataset}
+\bibfield{author}{\bibinfo{person}{Patricia Acosta-Vargas}, \bibinfo{person}{Mario Gonz{\'a}lez}, {and} \bibinfo{person}{Sergio Luj{\'a}n-Mora}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Dataset for evaluating the accessibility of the websites of selected Latin American universities}.
+\newblock \bibinfo{journal}{\emph{Data in brief}}  \bibinfo{volume}{28} (\bibinfo{year}{2020}), \bibinfo{pages}{105013}.
+\newblock
+
+
+\bibitem[Ahmad et~al\mbox{.}(2021)]%
+        {DBLP:conf/naacl/AhmadCRC21}
+\bibfield{author}{\bibinfo{person}{Wasi~Uddin Ahmad}, \bibinfo{person}{Saikat Chakraborty}, \bibinfo{person}{Baishakhi Ray}, {and} \bibinfo{person}{Kai{-}Wei Chang}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Unified Pre-training for Program Understanding and Generation}. In \bibinfo{booktitle}{\emph{Proceedings of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, {NAACL-HLT} 2021, Online, June 6-11, 2021}}, \bibfield{editor}{\bibinfo{person}{Kristina Toutanova}, \bibinfo{person}{Anna Rumshisky}, \bibinfo{person}{Luke Zettlemoyer}, \bibinfo{person}{Dilek Hakkani{-}T{\"{u}}r}, \bibinfo{person}{Iz~Beltagy}, \bibinfo{person}{Steven Bethard}, \bibinfo{person}{Ryan Cotterell}, \bibinfo{person}{Tanmoy Chakraborty}, {and} \bibinfo{person}{Yichao Zhou}} (Eds.). \bibinfo{publisher}{Association for Computational Linguistics}, \bibinfo{pages}{2655--2668}.
+\newblock
+\href{https://doi.org/10.18653/V1/2021.NAACL-MAIN.211}{doi:\nolinkurl{10.18653/V1/2021.NAACL-MAIN.211}}
+
+
+\bibitem[Aljedaani et~al\mbox{.}(2024)]%
+        {DBLP:conf/w4a/AljedaaniHAEF24}
+\bibfield{author}{\bibinfo{person}{Wajdi Aljedaani}, \bibinfo{person}{Abdulrahman Habib}, \bibinfo{person}{Ahmed Aljohani}, \bibinfo{person}{Marcelo Eler}, {and} \bibinfo{person}{Yunhe Feng}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Does ChatGPT Generate Accessible Code? Investigating Accessibility Challenges in LLM-Generated Source Code}. In \bibinfo{booktitle}{\emph{Proceedings of the 21st International Web for All Conference, {W4A} 2024, Singapore, May 13-14, 2024}}. \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{165--176}.
+\newblock
+\href{https://doi.org/10.1145/3677846.3677854}{doi:\nolinkurl{10.1145/3677846.3677854}}
+
+
+\bibitem[Almasoud and Mathkour(2019)]%
+        {DBLP:conf/icisdm/AlmasoudM19}
+\bibfield{author}{\bibinfo{person}{Suliman~K. Almasoud} {and} \bibinfo{person}{Hassan~I. Mathkour}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Instant Adaptation Enrichment Technique to Improve Web Accessibility for Blind Users}. In \bibinfo{booktitle}{\emph{Proceedings of the 3rd International Conference on Information System and Data Mining, {ICISDM} 2019, Houston, TX, USA, April 6-8, 2019}}. \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{159--164}.
+\newblock
+\href{https://doi.org/10.1145/3325917.3325931}{doi:\nolinkurl{10.1145/3325917.3325931}}
+
+
+\bibitem[Alshayban et~al\mbox{.}(2020)]%
+        {DBLP:conf/icse/Alshayban0M20}
+\bibfield{author}{\bibinfo{person}{Abdulaziz Alshayban}, \bibinfo{person}{Iftekhar Ahmed}, {and} \bibinfo{person}{Sam Malek}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Accessibility issues in Android apps: state of affairs, sentiments, and ways forward}. In \bibinfo{booktitle}{\emph{{ICSE} '20: 42nd International Conference on Software Engineering, Seoul, South Korea, 27 June - 19 July, 2020}}, \bibfield{editor}{\bibinfo{person}{Gregg Rothermel} {and} \bibinfo{person}{Doo{-}Hwan Bae}} (Eds.). \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{1323--1334}.
+\newblock
+\href{https://doi.org/10.1145/3377811.3380392}{doi:\nolinkurl{10.1145/3377811.3380392}}
+
+
+\bibitem[Austin et~al\mbox{.}(2021)]%
+        {DBLP:journals/corr/abs-2108-07732}
+\bibfield{author}{\bibinfo{person}{Jacob Austin}, \bibinfo{person}{Augustus Odena}, \bibinfo{person}{Maxwell~I. Nye}, \bibinfo{person}{Maarten Bosma}, \bibinfo{person}{Henryk Michalewski}, \bibinfo{person}{David Dohan}, \bibinfo{person}{Ellen Jiang}, \bibinfo{person}{Carrie~J. Cai}, \bibinfo{person}{Michael Terry}, \bibinfo{person}{Quoc~V. Le}, {and} \bibinfo{person}{Charles Sutton}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Program Synthesis with Large Language Models}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2108.07732} (\bibinfo{year}{2021}).
+\newblock
+\showeprint[arXiv]{2108.07732}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2108.07732}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Baptista et~al\mbox{.}(2016)]%
+        {baptista2016Web}
+\bibfield{author}{\bibinfo{person}{Ana Baptista}, \bibinfo{person}{Jos{\'e} Martins}, \bibinfo{person}{Ramiro Goncalves}, \bibinfo{person}{Frederico Branco}, {and} \bibinfo{person}{Tania Rocha}.} \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Web accessibility challenges and perspectives: A systematic literature review}. In \bibinfo{booktitle}{\emph{2016 11th Iberian Conference on Information Systems and Technologies (CISTI)}}. IEEE, \bibinfo{pages}{1--6}.
+\newblock
+
+
+\bibitem[Bi et~al\mbox{.}(2022)]%
+        {DBLP:journals/tosem/BiXLGZF22}
+\bibfield{author}{\bibinfo{person}{Tingting Bi}, \bibinfo{person}{Xin Xia}, \bibinfo{person}{David Lo}, \bibinfo{person}{John~C. Grundy}, \bibinfo{person}{Thomas Zimmermann}, {and} \bibinfo{person}{Denae Ford}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Accessibility in Software Practice: {A} Practitioner's Perspective}.
+\newblock \bibinfo{journal}{\emph{{ACM} Trans. Softw. Eng. Methodol.}} \bibinfo{volume}{31}, \bibinfo{number}{4} (\bibinfo{year}{2022}), \bibinfo{pages}{66:1--66:26}.
+\newblock
+\href{https://doi.org/10.1145/3503508}{doi:\nolinkurl{10.1145/3503508}}
+
+
+\bibitem[Caldwell et~al\mbox{.}(2008)]%
+        {caldwell2008Web}
+\bibfield{author}{\bibinfo{person}{Ben Caldwell}, \bibinfo{person}{Michael Cooper}, \bibinfo{person}{Loretta~Guarino Reid}, \bibinfo{person}{Gregg Vanderheiden}, \bibinfo{person}{Wendy Chisholm}, \bibinfo{person}{John Slatin}, {and} \bibinfo{person}{Jason White}.} \bibinfo{year}{2008}\natexlab{}.
+\newblock \showarticletitle{Web content accessibility guidelines (WCAG) 2.0}.
+\newblock \bibinfo{journal}{\emph{WWW Consortium (W3C)}} \bibinfo{volume}{290}, \bibinfo{number}{1-34} (\bibinfo{year}{2008}), \bibinfo{pages}{5--12}.
+\newblock
+
+
+\bibitem[Cesarano et~al\mbox{.}(2007)]%
+        {DBLP:conf/wse/CesaranoFT07}
+\bibfield{author}{\bibinfo{person}{Carmine Cesarano}, \bibinfo{person}{Anna~Rita Fasolino}, {and} \bibinfo{person}{Porfirio Tramontana}.} \bibinfo{year}{2007}\natexlab{}.
+\newblock \showarticletitle{Improving Usability of Web Pages for Blinds}. In \bibinfo{booktitle}{\emph{Proceedings of the 9th {IEEE} International Symposium on Web Systems Evolution, {WSE} 2009, 5-6 October 2007, Paris, France}}, \bibfield{editor}{\bibinfo{person}{Shihong Huang} {and} \bibinfo{person}{Massimiliano~Di Penta}} (Eds.). \bibinfo{publisher}{{IEEE} Computer Society}, \bibinfo{pages}{97--104}.
+\newblock
+\href{https://doi.org/10.1109/WSE.2007.4380250}{doi:\nolinkurl{10.1109/WSE.2007.4380250}}
+
+
+\bibitem[Chen et~al\mbox{.}(2020)]%
+        {DBLP:conf/icse/ChenCXXZ0W20}
+\bibfield{author}{\bibinfo{person}{Jieshan Chen}, \bibinfo{person}{Chunyang Chen}, \bibinfo{person}{Zhenchang Xing}, \bibinfo{person}{Xiwei Xu}, \bibinfo{person}{Liming Zhu}, \bibinfo{person}{Guoqiang Li}, {and} \bibinfo{person}{Jinshui Wang}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Unblind your apps: predicting natural-language labels for mobile {GUI} components by deep learning}. In \bibinfo{booktitle}{\emph{{ICSE} '20: 42nd International Conference on Software Engineering, Seoul, South Korea, 27 June - 19 July, 2020}}, \bibfield{editor}{\bibinfo{person}{Gregg Rothermel} {and} \bibinfo{person}{Doo{-}Hwan Bae}} (Eds.). \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{322--334}.
+\newblock
+\href{https://doi.org/10.1145/3377811.3380327}{doi:\nolinkurl{10.1145/3377811.3380327}}
+
+
+\bibitem[Chen et~al\mbox{.}(2021)]%
+        {DBLP:journals/corr/abs-2107-03374}
+\bibfield{author}{\bibinfo{person}{Mark Chen}, \bibinfo{person}{Jerry Tworek}, \bibinfo{person}{Heewoo Jun}, \bibinfo{person}{Qiming Yuan}, \bibinfo{person}{Henrique~Pond{\'{and}} de Oliveira~Pinto}, \bibinfo{person}{Jared Kaplan}, \bibinfo{person}{Harrison Edwards}, \bibinfo{person}{Yuri swear~here Nicholas~Joseph}, \bibinfo{person}{Greg Brockman}, \bibinfo{person}{Alex Ray}, \bibinfo{person}{Raul Puri}, \bibinfo{person}{Gretchen Krueger}, \bibinfo{person}{Michael Petrov}, \bibinfo{person}{Heidy Khlaaf}, \bibinfo{person}{Girish Sastry}, \bibinfo{person}{Pamela Mishkin}, \bibinfo{person}{Brooke Chan}, \bibinfo{person}{Scott Gray}, \bibinfo{person}{Nick Ryder}, \bibinfo{person}{Mikhail Pavlov}, \bibinfo{person}{Alethea Power}, \bibinfo{person}{Lukasz Kaiser}, \bibinfo{person}{Mohammad Bavarian}, \bibinfo{person}{Clemens Winter}, \bibinfo{person}{Philippe Tillet}, \bibinfo{person}{Felipe~Petroski Such}, \bibinfo{person}{Dave Cummings}, \bibinfo{person}{Matthias Plappert}, \bibinfo{person}{Fotios Chantzis},
+  \bibinfo{person}{Elizabeth Barnes}, \bibinfo{person}{Ariel Herbert{-}Voss}, \bibinfo{person}{William~Hebgen Cast}, \bibinfo{person}{Alex Nichol}, \bibinfo{person}{Alex Paino}, \bibinfo{person}{Nikolas Tezak}, \bibinfo{person}{Jie Tang}, \bibinfo{person}{Igor Babuschkin}, \bibinfo{person}{Suchir Balaji}, \bibinfo{person}{Shantanu Jain}, \bibinfo{person}{William Saunders}, \bibinfo{person}{Christopher Hesse}, \bibinfo{person}{Andrew~N. Carr}, \bibinfo{person}{Jan Leike}, \bibinfo{person}{Joshua Achiam}, \bibinfo{person}{Vedant Misra}, \bibinfo{person}{Evan Morikawa}, \bibinfo{person}{Alec Radford}, \bibinfo{person}{Matthew Knight}, \bibinfo{person}{Miles Brundage}, \bibinfo{person}{Mira Murati}, \bibinfo{person}{Katie Mayer}, \bibinfo{person}{Peter Welinder}, \bibinfo{person}{Bob McGrew}, \bibinfo{person}{Dario Amodei}, \bibinfo{person}{Sam McCandlish}, \bibinfo{person}{Ilya Sutskever}, {and} \bibinfo{person}{Wojciech Zaremba}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Evaluating Large Language Models Trained on Code}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2107.03374} (\bibinfo{year}{2021}).
+\newblock
+\showeprint[arXiv]{2107.03374}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2107.03374}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Craven(2006)]%
+        {craven2006Web}
+\bibfield{author}{\bibinfo{person}{Jenny Craven}.} \bibinfo{year}{2006}\natexlab{}.
+\newblock \showarticletitle{Web accessibility: A review of research and initiatives}.
+\newblock  (\bibinfo{year}{2006}).
+\newblock
+
+
+\bibitem[Delnevo et~al\mbox{.}(2024)]%
+        {DBLP:conf/ccnc/DelnevoAM24}
+\bibfield{author}{\bibinfo{person}{Giovanni Delnevo}, \bibinfo{person}{Manuel Andruccioli}, {and} \bibinfo{person}{Silvia Mirri}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{On the Interaction with Large Language Models for Web Accessibility: Implications and Challenges}. In \bibinfo{booktitle}{\emph{21st {IEEE} Consumer Communications {\&} Networking Conference, {CCNC} 2024, Las Vegas, NV, USA, January 6-9, 2024}}. \bibinfo{publisher}{{IEEE}}, \bibinfo{pages}{1--6}.
+\newblock
+\href{https://doi.org/10.1109/CCNC51664.2024.10454680}{doi:\nolinkurl{10.1109/CCNC51664.2024.10454680}}
+
+
+\bibitem[Doush and Qasem(2024)]%
+        {iyad2024}
+\bibfield{author}{\bibinfo{person}{Iyad~Abu Doush} {and} \bibinfo{person}{Reem Qasem}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Evaluating AI-Generated Web Code for Accessibility Compliance: A Metric-Driven Approach}. In \bibinfo{booktitle}{\emph{Proceedings of Software Development and Technologies for Enhancing Accessibility and Fighting Info-exclusion (DSAI '24)}}. \bibinfo{publisher}{ACM}.
+\newblock
+
+
+\bibitem[Fathallah et~al\mbox{.}(2024a)]%
+        {fathallah2024empowering}
+\bibfield{author}{\bibinfo{person}{Nadeen Fathallah}, \bibinfo{person}{Monika Bhole}, {and} \bibinfo{person}{Steffen Staab}.} \bibinfo{year}{2024}\natexlab{a}.
+\newblock \showarticletitle{Empowering the Deaf and Hard of Hearing Community: Enhancing Video Captions Using Large Language Models}. In \bibinfo{booktitle}{\emph{Proceedings of Software Development and Technologies for Enhancing Accessibility and Fighting Info-exclusion (DSAI '24)}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, USA}, \bibinfo{pages}{1--9}.
+\newblock
+\href{https://doi.org/10.48550/arXiv.2412.00342}{doi:\nolinkurl{10.48550/arXiv.2412.00342}}
+
+
+\bibitem[Fathallah et~al\mbox{.}(2024b)]%
+        {fathallah2024neon}
+\bibfield{author}{\bibinfo{person}{Nadeen Fathallah}, \bibinfo{person}{Arunav Das}, \bibinfo{person}{Stefano De~Giorgis}, \bibinfo{person}{Andrea Poltronieri}, \bibinfo{person}{Peter Haase}, {and} \bibinfo{person}{Liubov Kovriguina}.} \bibinfo{year}{2024}\natexlab{b}.
+\newblock \showarticletitle{NeOn-GPT: A Large Language Model-Powered Pipeline for Ontology Learning}. In \bibinfo{booktitle}{\emph{The Extended Semantic Web Conference}}.
+\newblock
+
+
+\bibitem[Ferati and Sulejmani(2016)]%
+        {DBLP:conf/hci/FeratiS16}
+\bibfield{author}{\bibinfo{person}{Mexhid Ferati} {and} \bibinfo{person}{Lirim Sulejmani}.} \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Automatic Adaptation Techniques to Increase the Web Accessibility for Blind Users}. In \bibinfo{booktitle}{\emph{{HCI} International 2016 - Posters' Extended Abstracts - 18th International Conference, {HCI} International 2016, Toronto, Canada, July 17-22, 2016, Proceedings, Part {II}}} \emph{(\bibinfo{series}{Communications in Computer and Information Science}, Vol.~\bibinfo{volume}{618})}, \bibfield{editor}{\bibinfo{person}{Constantine Stephanidis}} (Ed.). \bibinfo{publisher}{Springer}, \bibinfo{pages}{30--36}.
+\newblock
+\href{https://doi.org/10.1007/978-3-319-40542-1\_5}{doi:\nolinkurl{10.1007/978-3-319-40542-1\_5}}
+
+
+\bibitem[Fleming and Lau(2014)]%
+        {fleming2014measure}
+\bibfield{author}{\bibinfo{person}{Stephen~M Fleming} {and} \bibinfo{person}{Hakwan~C Lau}.} \bibinfo{year}{2014}\natexlab{}.
+\newblock \showarticletitle{How to measure metacognition}.
+\newblock \bibinfo{journal}{\emph{Frontiers in human neuroscience}}  \bibinfo{volume}{8} (\bibinfo{year}{2014}), \bibinfo{pages}{443}.
+\newblock
+
+
+\bibitem[Frith(2012)]%
+        {frith2012role}
+\bibfield{author}{\bibinfo{person}{Chris~D Frith}.} \bibinfo{year}{2012}\natexlab{}.
+\newblock \showarticletitle{The role of metacognition in human social interactions}.
+\newblock \bibinfo{journal}{\emph{Philosophical Transactions of the Royal Society B: Biological Sciences}} \bibinfo{volume}{367}, \bibinfo{number}{1599} (\bibinfo{year}{2012}), \bibinfo{pages}{2213--2223}.
+\newblock
+
+
+\bibitem[Gu et~al\mbox{.}(2021)]%
+        {DBLP:journals/corr/abs-2111-02643}
+\bibfield{author}{\bibinfo{person}{Xiaodong Gu}, \bibinfo{person}{Kang~Min Yoo}, {and} \bibinfo{person}{Sang{-}Woo Lee}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Response Generation with Context-Aware Prompt Learning}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2111.02643} (\bibinfo{year}{2021}).
+\newblock
+\showeprint[arXiv]{2111.02643}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2111.02643}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Huang et~al\mbox{.}(2024)]%
+        {DBLP:journals/corr/abs-2401-16450}
+\bibfield{author}{\bibinfo{person}{Calista Huang}, \bibinfo{person}{Alyssa Ma}, \bibinfo{person}{Suchir Vyasamudri}, \bibinfo{person}{Eugenie Puype}, \bibinfo{person}{Sayem Kamal}, \bibinfo{person}{Juan~Belza Garcia}, \bibinfo{person}{Salar Cheema}, {and} \bibinfo{person}{Michael Lutz}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{{ACCESS:} Prompt Engineering for Automated Web Accessibility Violation Corrections}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2401.16450} (\bibinfo{year}{2024}).
+\newblock
+\href{https://doi.org/10.48550/ARXIV.2401.16450}{doi:\nolinkurl{10.48550/ARXIV.2401.16450}}
+\showeprint[arXiv]{2401.16450}
+
+
+\bibitem[Kirkpatrick et~al\mbox{.}(2023)]%
+        {kirkpatrick2023wcag}
+\bibfield{author}{\bibinfo{person}{Andrew Kirkpatrick}, \bibinfo{person}{Joshue O'Connor}, \bibinfo{person}{Alastair Campbell}, {and} \bibinfo{person}{Michael Cooper}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Web Content Accessibility Guidelines (WCAG) 2.1}}.
+\newblock \bibinfo{type}{Technical report}. \bibinfo{institution}{World Wide Web Consortium (W3C)}.
+\newblock
+\urldef\tempurl%
+\url{https://www.w3.org/TR/2023/REC-WCAG21-20230921/}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Kodandaram et~al\mbox{.}(2024)]%
+        {kodandaram2024enabling}
+\bibfield{author}{\bibinfo{person}{Satwik~Ram Kodandaram}, \bibinfo{person}{Utku Uckun}, \bibinfo{person}{Xiaojun Bi}, \bibinfo{person}{IV Ramakrishnan}, {and} \bibinfo{person}{Vikas Ashok}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Enabling Uniform Computer Interaction Experience for Blind Users through Large Language Models}. In \bibinfo{booktitle}{\emph{Proceedings of the 26th International ACM SIGACCESS Conference on Computers and Accessibility}}. \bibinfo{pages}{1--14}.
+\newblock
+
+
+\bibitem[Kong et~al\mbox{.}(2024)]%
+        {roleplay}
+\bibfield{author}{\bibinfo{person}{Aobo Kong}, \bibinfo{person}{Shiwan Zhao}, \bibinfo{person}{Hao Chen}, \bibinfo{person}{Qicheng Li}, \bibinfo{person}{Yong Qin}, \bibinfo{person}{Ruiqi Sun}, \bibinfo{person}{Xin Zhou}, \bibinfo{person}{Enzhi Wang}, {and} \bibinfo{person}{Xiaohang Dong}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Better Zero-Shot Reasoning with Role-Play Prompting}. In \bibinfo{booktitle}{\emph{Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers), {NAACL} 2024, Mexico City, Mexico, June 16-21, 2024}}, \bibfield{editor}{\bibinfo{person}{Kevin Duh}, \bibinfo{person}{Helena G{\'{o}}mez{-}Adorno}, {and} \bibinfo{person}{Steven Bethard}} (Eds.). \bibinfo{publisher}{Association for Computational Linguistics}, \bibinfo{pages}{4099--4113}.
+\newblock
+\href{https://doi.org/10.18653/V1/2024.NAACL-LONG.228}{doi:\nolinkurl{10.18653/V1/2024.NAACL-LONG.228}}
+
+
+\bibitem[Li et~al\mbox{.}(2020)]%
+        {DBLP:conf/emnlp/LiLHZLG20}
+\bibfield{author}{\bibinfo{person}{Yang Li}, \bibinfo{person}{Gang Li}, \bibinfo{person}{Luheng He}, \bibinfo{person}{Jingjie Zheng}, \bibinfo{person}{Hong Li}, {and} \bibinfo{person}{Zhiwei Guan}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Widget Captioning: Generating Natural Language Description for Mobile User Interface Elements}. In \bibinfo{booktitle}{\emph{Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, {EMNLP} 2020, Online, November 16-20, 2020}}, \bibfield{editor}{\bibinfo{person}{Bonnie Webber}, \bibinfo{person}{Trevor Cohn}, \bibinfo{person}{Yulan He}, {and} \bibinfo{person}{Yang Liu}} (Eds.). \bibinfo{publisher}{Association for Computational Linguistics}, \bibinfo{pages}{5495--5510}.
+\newblock
+\href{https://doi.org/10.18653/V1/2020.EMNLP-MAIN.443}{doi:\nolinkurl{10.18653/V1/2020.EMNLP-MAIN.443}}
+
+
+\bibitem[Lin(2004)]%
+        {lin2004rouge}
+\bibfield{author}{\bibinfo{person}{Chin-Yew Lin}.} \bibinfo{year}{2004}\natexlab{}.
+\newblock \showarticletitle{Rouge: A package for automatic evaluation of summaries}. In \bibinfo{booktitle}{\emph{Text summarization branches out}}. \bibinfo{pages}{74--81}.
+\newblock
+
+
+\bibitem[Liu et~al\mbox{.}(2023)]%
+        {DBLP:conf/nips/LiuXW023}
+\bibfield{author}{\bibinfo{person}{Jiawei Liu}, \bibinfo{person}{Chunqiu~Steven Xia}, \bibinfo{person}{Yuyao Wang}, {and} \bibinfo{person}{Lingming Zhang}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Is Your Code Generated by ChatGPT Really Correct? Rigorous Evaluation of Large Language Models for Code Generation}. In \bibinfo{booktitle}{\emph{Advances in Neural Information Processing Systems 36: Annual Conference on Neural Information Processing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023}}, \bibfield{editor}{\bibinfo{person}{Alice Oh}, \bibinfo{person}{Tristan Naumann}, \bibinfo{person}{Amir Globerson}, \bibinfo{person}{Kate Saenko}, \bibinfo{person}{Moritz Hardt}, {and} \bibinfo{person}{Sergey Levine}} (Eds.).
+\newblock
+\urldef\tempurl%
+\url{http://papers.nips.cc/paper\_files/paper/2023/hash/43e9d647ccd3e4b7b5baab53f0368686-Abstract-Conference.html}
+\showURL{%
+\tempurl}
+
+
+\bibitem[L{\'o}pez-Gil and Pereira(2024)]%
+        {lopez2024turning}
+\bibfield{author}{\bibinfo{person}{Juan-Miguel L{\'o}pez-Gil} {and} \bibinfo{person}{Juanan Pereira}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Turning manual web accessibility success criteria into automatic: an LLM-based approach}.
+\newblock \bibinfo{journal}{\emph{Universal Access in the Information Society}} (\bibinfo{year}{2024}), \bibinfo{pages}{1--16}.
+\newblock
+
+
+\bibitem[Mangiatordi and Lazzari(2018)]%
+        {DBLP:conf/ccnc/MangiatordiL18}
+\bibfield{author}{\bibinfo{person}{Andrea Mangiatordi} {and} \bibinfo{person}{Marco Lazzari}.} \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{Combined use of artificial intelligence and crowdsourcing to provide alternative content for images on websites}. In \bibinfo{booktitle}{\emph{15th {IEEE} Annual Consumer Communications {\&} Networking Conference, {CCNC} 2018, Las Vegas, NV, USA, January 12-15, 2018}}. \bibinfo{publisher}{{IEEE}}, \bibinfo{pages}{1--6}.
+\newblock
+\href{https://doi.org/10.1109/CCNC.2018.8319312}{doi:\nolinkurl{10.1109/CCNC.2018.8319312}}
+
+
+\bibitem[Mehendale and Walishetti(2024)]%
+        {mehendale2024dexassist}
+\bibfield{author}{\bibinfo{person}{Shridhar Mehendale} {and} \bibinfo{person}{Ankit Walishetti}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{DexAssist: A Voice-Enabled Dual-LLM Framework for Accessible Web Navigation}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2411.12214}} (\bibinfo{year}{2024}).
+\newblock
+
+
+\bibitem[{Microsoft}(2024)]%
+        {PlaywrightAPI}
+\bibfield{author}{\bibinfo{person}{{Microsoft}}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Playwright API}.
+\newblock \bibinfo{howpublished}{\url{https://playwright.dev}}.
+\newblock
+\newblock
+\shownote{Accessed: 2024-06-30}.
+
+
+\bibitem[Nam et~al\mbox{.}(2024)]%
+        {DBLP:conf/icse/NamMHVM24}
+\bibfield{author}{\bibinfo{person}{Daye Nam}, \bibinfo{person}{Andrew Macvean}, \bibinfo{person}{Vincent~J. Hellendoorn}, \bibinfo{person}{Bogdan Vasilescu}, {and} \bibinfo{person}{Brad~A. Myers}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Using an {LLM} to Help With Code Understanding}. In \bibinfo{booktitle}{\emph{Proceedings of the 46th {IEEE/ACM} International Conference on Software Engineering, {ICSE} 2024, Lisbon, Portugal, April 14-20, 2024}}. \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{97:1--97:13}.
+\newblock
+\href{https://doi.org/10.1145/3597503.3639187}{doi:\nolinkurl{10.1145/3597503.3639187}}
+
+
+\bibitem[Njifenjou et~al\mbox{.}(2024)]%
+        {DBLP:journals/corr/abs-2406-18460}
+\bibfield{author}{\bibinfo{person}{Ahmed Njifenjou}, \bibinfo{person}{Virgile Sucal}, \bibinfo{person}{Bassam Jabaian}, {and} \bibinfo{person}{Fabrice Lef{\`{e}}vre}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Role-Play Zero-Shot Prompting with Large Language Models for Open-Domain Human-Machine Conversation}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2406.18460} (\bibinfo{year}{2024}).
+\newblock
+\href{https://doi.org/10.48550/ARXIV.2406.18460}{doi:\nolinkurl{10.48550/ARXIV.2406.18460}}
+\showeprint[arXiv]{2406.18460}
+
+
+\bibitem[OpenAI(2023)]%
+        {DBLP:journals/corr/abs-2303-08774}
+\bibfield{author}{\bibinfo{person}{OpenAI}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{{GPT-4} Technical Report}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2303.08774} (\bibinfo{year}{2023}).
+\newblock
+\href{https://doi.org/10.48550/ARXIV.2303.08774}{doi:\nolinkurl{10.48550/ARXIV.2303.08774}}
+\showeprint[arXiv]{2303.08774}
+
+
+\bibitem[Othman et~al\mbox{.}(2023)]%
+        {DBLP:conf/petra/OthmanDJ23}
+\bibfield{author}{\bibinfo{person}{Achraf Othman}, \bibinfo{person}{Amira Dhouib}, {and} \bibinfo{person}{Aljazi Nasser~Al Jabor}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Fostering websites accessibility: {A} case study on the use of the Large Language Models ChatGPT for automatic remediation}. In \bibinfo{booktitle}{\emph{Proceedings of the 16th International Conference on PErvasive Technologies Related to Assistive Environments, {PETRA} 2023, Corfu, Greece, July 5-7, 2023}}. \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{707--713}.
+\newblock
+\href{https://doi.org/10.1145/3594806.3596542}{doi:\nolinkurl{10.1145/3594806.3596542}}
+
+
+\bibitem[Pereira et~al\mbox{.}(2024)]%
+        {DBLP:journals/taccess/PereiraGRGD24}
+\bibfield{author}{\bibinfo{person}{Let{\'{\i}}cia~Seixas Pereira}, \bibinfo{person}{Jo{\~{a}}o Guerreiro}, \bibinfo{person}{Andr{\'{e}} Rodrigues}, \bibinfo{person}{Tiago~Jo{\~{a}}o Guerreiro}, {and} \bibinfo{person}{Carlos Duarte}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{From Automation to User Empowerment: Investigating the Role of a Semi-automatic Tool in Social Media Accessibility}.
+\newblock \bibinfo{journal}{\emph{{ACM} Trans. Access. Comput.}} \bibinfo{volume}{17}, \bibinfo{number}{3} (\bibinfo{year}{2024}), \bibinfo{pages}{13:1--13:25}.
+\newblock
+\href{https://doi.org/10.1145/3647643}{doi:\nolinkurl{10.1145/3647643}}
+
+
+\bibitem[Post(2018)]%
+        {post2018call}
+\bibfield{author}{\bibinfo{person}{Matt Post}.} \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{A call for clarity in reporting BLEU scores}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:1804.08771}} (\bibinfo{year}{2018}).
+\newblock
+
+
+\bibitem[Raman et~al\mbox{.}(2022)]%
+        {DBLP:journals/corr/abs-2211-09935}
+\bibfield{author}{\bibinfo{person}{Shreyas~Sundara Raman}, \bibinfo{person}{Vanya Cohen}, \bibinfo{person}{Eric Rosen}, \bibinfo{person}{Ifrah Idrees}, \bibinfo{person}{David Paulius}, {and} \bibinfo{person}{Stefanie Tellex}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Planning with Large Language Models via Corrective Re-prompting}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2211.09935} (\bibinfo{year}{2022}).
+\newblock
+\href{https://doi.org/10.48550/ARXIV.2211.09935}{doi:\nolinkurl{10.48550/ARXIV.2211.09935}}
+\showeprint[arXiv]{2211.09935}
+
+
+\bibitem[Rao et~al\mbox{.}(2022)]%
+        {DBLP:conf/cvpr/RaoZ0TZH0L22}
+\bibfield{author}{\bibinfo{person}{Yongming Rao}, \bibinfo{person}{Wenliang Zhao}, \bibinfo{person}{Guangyi Chen}, \bibinfo{person}{Yansong Tang}, \bibinfo{person}{Zheng Zhu}, \bibinfo{person}{Guan Huang}, \bibinfo{person}{Jie Zhou}, {and} \bibinfo{person}{Jiwen Lu}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{DenseCLIP: Language-Guided Dense Prediction with Context-Aware Prompting}. In \bibinfo{booktitle}{\emph{{IEEE/CVF} Conference on Computer Vision and Pattern Recognition, {CVPR} 2022, New Orleans, LA, USA, June 18-24, 2022}}. \bibinfo{publisher}{{IEEE}}, \bibinfo{pages}{18061--18070}.
+\newblock
+\href{https://doi.org/10.1109/CVPR52688.2022.01755}{doi:\nolinkurl{10.1109/CVPR52688.2022.01755}}
+
+
+\bibitem[Reimers and Gurevych(2019)]%
+        {reimers2019sentence}
+\bibfield{author}{\bibinfo{person}{Nils Reimers} {and} \bibinfo{person}{Iryna Gurevych}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Sentence-bert: Sentence embeddings using siamese bert-networks}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:1908.10084}} (\bibinfo{year}{2019}).
+\newblock
+
+
+\bibitem[Rutter et~al\mbox{.}(2007)]%
+        {rutter2007Web}
+\bibfield{author}{\bibinfo{person}{Richard Rutter}, \bibinfo{person}{Patrick~H Lauke}, \bibinfo{person}{Cynthia Waddell}, \bibinfo{person}{Jim Thatcher}, \bibinfo{person}{Shawn~Lawton Henry}, \bibinfo{person}{Bruce Lawson}, \bibinfo{person}{Andrew Kirkpatrick}, \bibinfo{person}{Christian Heilmann}, \bibinfo{person}{Michael~R Burks}, \bibinfo{person}{Bob Regan}, {et~al\mbox{.}}} \bibinfo{year}{2007}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Web accessibility: Web standards and regulatory compliance}}.
+\newblock \bibinfo{publisher}{Apress}.
+\newblock
+
+
+\bibitem[Sahoo et~al\mbox{.}(2024)]%
+        {DBLP:journals/corr/abs-2402-07927}
+\bibfield{author}{\bibinfo{person}{Pranab Sahoo}, \bibinfo{person}{Ayush~Kumar Singh}, \bibinfo{person}{Sriparna Saha}, \bibinfo{person}{Vinija Jain}, \bibinfo{person}{Samrat Mondal}, {and} \bibinfo{person}{Aman Chadha}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{A Systematic Survey of Prompt Engineering in Large Language Models: Techniques and Applications}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2402.07927} (\bibinfo{year}{2024}).
+\newblock
+\href{https://doi.org/10.48550/ARXIV.2402.07927}{doi:\nolinkurl{10.48550/ARXIV.2402.07927}}
+\showeprint[arXiv]{2402.07927}
+
+
+\bibitem[Salisbury et~al\mbox{.}(2017)]%
+        {DBLP:conf/hcomp/SalisburyKM17}
+\bibfield{author}{\bibinfo{person}{Elliot Salisbury}, \bibinfo{person}{Ece Kamar}, {and} \bibinfo{person}{Meredith~Ringel Morris}.} \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Toward Scalable Social Alt Text: Conversational Crowdsourcing as a Tool for Refining Vision-to-Language Technology for the Blind}. In \bibinfo{booktitle}{\emph{Proceedings of the Fifth {AAAI} Conference on Human Computation and Crowdsourcing, {HCOMP} 2017, 23-26 October 2017, Qu{\'{e}}bec City, Qu{\'{e}}bec, Canada}}, \bibfield{editor}{\bibinfo{person}{Steven Dow} {and} \bibinfo{person}{Adam~Tauman Kalai}} (Eds.). \bibinfo{publisher}{{AAAI} Press}, \bibinfo{pages}{147--156}.
+\newblock
+\href{https://doi.org/10.1609/HCOMP.V5I1.13301}{doi:\nolinkurl{10.1609/HCOMP.V5I1.13301}}
+
+
+\bibitem[Shanahan et~al\mbox{.}(2023)]%
+        {DBLP:journals/nature/ShanahanMR23}
+\bibfield{author}{\bibinfo{person}{Murray Shanahan}, \bibinfo{person}{Kyle McDonell}, {and} \bibinfo{person}{Laria Reynolds}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Role play with large language models}.
+\newblock \bibinfo{journal}{\emph{Nat.}} \bibinfo{volume}{623}, \bibinfo{number}{7987} (\bibinfo{year}{2023}), \bibinfo{pages}{493--498}.
+\newblock
+\href{https://doi.org/10.1038/S41586-023-06647-8}{doi:\nolinkurl{10.1038/S41586-023-06647-8}}
+
+
+\bibitem[{\v{S}}mite et~al\mbox{.}(2014)]%
+        {vsmite2014empirically}
+\bibfield{author}{\bibinfo{person}{Darja {\v{S}}mite}, \bibinfo{person}{Claes Wohlin}, \bibinfo{person}{Zane Galvi{\c{n}}a}, {and} \bibinfo{person}{Rafael Prikladnicki}.} \bibinfo{year}{2014}\natexlab{}.
+\newblock \showarticletitle{An empirically based terminology and taxonomy for global software engineering}.
+\newblock \bibinfo{journal}{\emph{Empirical Software Engineering}}  \bibinfo{volume}{19} (\bibinfo{year}{2014}), \bibinfo{pages}{105--153}.
+\newblock
+
+
+\bibitem[Tuan et~al\mbox{.}(2012)]%
+        {tuan2012checking}
+\bibfield{author}{\bibinfo{person}{Dat~Trinh Tuan}, \bibinfo{person}{Van-Hung Phan}, {et~al\mbox{.}}} \bibinfo{year}{2012}\natexlab{}.
+\newblock \showarticletitle{Checking and correcting the source code of web pages for accessibility}. In \bibinfo{booktitle}{\emph{2012 IEEE RIVF International Conference on Computing \& Communication Technologies, Research, Innovation, and Vision for the Future}}. IEEE, \bibinfo{pages}{1--4}.
+\newblock
+
+
+\bibitem[Usman et~al\mbox{.}(2017)]%
+        {usman2017taxonomies}
+\bibfield{author}{\bibinfo{person}{Muhammad Usman}, \bibinfo{person}{Ricardo Britto}, \bibinfo{person}{J{\"u}rgen B{\"o}rstler}, {and} \bibinfo{person}{Emilia Mendes}.} \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Taxonomies in software engineering: A systematic mapping study and a revised taxonomy development method}.
+\newblock \bibinfo{journal}{\emph{Information and Software Technology}}  \bibinfo{volume}{85} (\bibinfo{year}{2017}), \bibinfo{pages}{43--59}.
+\newblock
+
+
+\bibitem[Vaithilingam et~al\mbox{.}(2022)]%
+        {DBLP:conf/chi/Vaithilingam0G22}
+\bibfield{author}{\bibinfo{person}{Priyan Vaithilingam}, \bibinfo{person}{Tianyi Zhang}, {and} \bibinfo{person}{Elena~L. Glassman}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Expectation vs. Experience: Evaluating the Usability of Code Generation Tools Powered by Large Language Models}. In \bibinfo{booktitle}{\emph{{CHI} '22: {CHI} Conference on Human Factors in Computing Systems, New Orleans, LA, USA, 29 April 2022 - 5 May 2022, Extended Abstracts}}, \bibfield{editor}{\bibinfo{person}{Simone D.~J. Barbosa}, \bibinfo{person}{Cliff Lampe}, \bibinfo{person}{Caroline Appert}, {and} \bibinfo{person}{David~A. Shamma}} (Eds.). \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{332:1--332:7}.
+\newblock
+\href{https://doi.org/10.1145/3491101.3519665}{doi:\nolinkurl{10.1145/3491101.3519665}}
+
+
+\bibitem[Vinyals et~al\mbox{.}(2015)]%
+        {DBLP:conf/cvpr/VinyalsTBE15}
+\bibfield{author}{\bibinfo{person}{Oriol Vinyals}, \bibinfo{person}{Alexander Toshev}, \bibinfo{person}{Samy Bengio}, {and} \bibinfo{person}{Dumitru Erhan}.} \bibinfo{year}{2015}\natexlab{}.
+\newblock \showarticletitle{Show and tell: {A} neural image caption generator}. In \bibinfo{booktitle}{\emph{{IEEE} Conference on Computer Vision and Pattern Recognition, {CVPR} 2015, Boston, MA, USA, June 7-12, 2015}}. \bibinfo{publisher}{{IEEE} Computer Society}, \bibinfo{pages}{3156--3164}.
+\newblock
+\href{https://doi.org/10.1109/CVPR.2015.7298935}{doi:\nolinkurl{10.1109/CVPR.2015.7298935}}
+
+
+\bibitem[Wang et~al\mbox{.}(2024)]%
+        {DBLP:conf/acl/WangPQLZWGGN00024}
+\bibfield{author}{\bibinfo{person}{Noah Wang}, \bibinfo{person}{Z. y. Peng}, \bibinfo{person}{Haoran Que}, \bibinfo{person}{Jiaheng Liu}, \bibinfo{person}{Wangchunshu Zhou}, \bibinfo{person}{Yuhan Wu}, \bibinfo{person}{Hongcheng Guo}, \bibinfo{person}{Ruitong Gan}, \bibinfo{person}{Zehao Ni}, \bibinfo{person}{Jian Yang}, \bibinfo{person}{Man Zhang}, \bibinfo{person}{Zhaoxiang Zhang}, \bibinfo{person}{Wanli Ouyang}, \bibinfo{person}{Ke Xu}, \bibinfo{person}{Wenhao Huang}, \bibinfo{person}{Jie Fu}, {and} \bibinfo{person}{Junran Peng}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{RoleLLM: Benchmarking, Eliciting, and Enhancing Role-Playing Abilities of Large Language Models}. In \bibinfo{booktitle}{\emph{Findings of the Association for Computational Linguistics, {ACL} 2024, Bangkok, Thailand and virtual meeting, August 11-16, 2024}}, \bibfield{editor}{\bibinfo{person}{Lun{-}Wei Ku}, \bibinfo{person}{Andre Martins}, {and} \bibinfo{person}{Vivek Srikumar}} (Eds.). \bibinfo{publisher}{Association for Computational Linguistics}, \bibinfo{pages}{14743--14777}.
+\newblock
+\href{https://doi.org/10.18653/V1/2024.FINDINGS-ACL.878}{doi:\nolinkurl{10.18653/V1/2024.FINDINGS-ACL.878}}
+
+
+\bibitem[Wang and Zhao(2023)]%
+        {DBLP:journals/corr/abs-2308-05342}
+\bibfield{author}{\bibinfo{person}{Yuqing Wang} {and} \bibinfo{person}{Yun Zhao}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Metacognitive Prompting Improves Understanding in Large Language Models}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2308.05342} (\bibinfo{year}{2023}).
+\newblock
+\href{https://doi.org/10.48550/ARXIV.2308.05342}{doi:\nolinkurl{10.48550/ARXIV.2308.05342}}
+\showeprint[arXiv]{2308.05342}
+
+
+\bibitem[{WebAIM}(2025)]%
+        {Webaim2025wave}
+\bibfield{author}{\bibinfo{person}{{WebAIM}}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \bibinfo{title}{{WAVE}}.
+\newblock \bibinfo{howpublished}{\url{https://wave.webaim.org/api/}}.
+\newblock
+\newblock
+\shownote{Retrieved 2025-01-11}.
+
+
+\bibitem[WebAIM(2025)]%
+        {Webaim2025}
+\bibfield{author}{\bibinfo{person}{WebAIM}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{The WebAIM Million - An Annual Accessibility Analysis of the Top 1,000,000 Home Pages}}.
+\newblock \bibinfo{type}{Technical Report}. \bibinfo{institution}{WebAIM.org}.
+\newblock
+\urldef\tempurl%
+\url{https://webaim.org/projects/million/}
+\showURL{%
+\tempurl}
+
+
+\bibitem[White et~al\mbox{.}(2023)]%
+        {DBLP:journals/corr/abs-2302-11382}
+\bibfield{author}{\bibinfo{person}{Jules White}, \bibinfo{person}{Quchen Fu}, \bibinfo{person}{Sam Hays}, \bibinfo{person}{Michael Sandborn}, \bibinfo{person}{Carlos Olea}, \bibinfo{person}{Henry Gilbert}, \bibinfo{person}{Ashraf Elnashar}, \bibinfo{person}{Jesse Spencer{-}Smith}, {and} \bibinfo{person}{Douglas~C. Schmidt}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{A Prompt Pattern Catalog to Enhance Prompt Engineering with ChatGPT}.
+\newblock \bibinfo{journal}{\emph{CoRR}}  \bibinfo{volume}{abs/2302.11382} (\bibinfo{year}{2023}).
+\newblock
+\href{https://doi.org/10.48550/ARXIV.2302.11382}{doi:\nolinkurl{10.48550/ARXIV.2302.11382}}
+\showeprint[arXiv]{2302.11382}
+
+
+\bibitem[Wu et~al\mbox{.}(2017)]%
+        {DBLP:conf/cscw/WuWFS17}
+\bibfield{author}{\bibinfo{person}{Shaomei Wu}, \bibinfo{person}{Jeffrey Wieland}, \bibinfo{person}{Omid Farivar}, {and} \bibinfo{person}{Julie Schiller}.} \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Automatic Alt-text: Computer-generated Image Descriptions for Blind Users on a Social Network Service}. In \bibinfo{booktitle}{\emph{Proceedings of the 2017 {ACM} Conference on Computer Supported Cooperative Work and Social Computing, {CSCW} 2017, Portland, OR, USA, February 25 - March 1, 2017}}, \bibfield{editor}{\bibinfo{person}{Charlotte~P. Lee}, \bibinfo{person}{Steven~E. Poltrock}, \bibinfo{person}{Louise Barkhuus}, \bibinfo{person}{Marcos Borges}, {and} \bibinfo{person}{Wendy~A. Kellogg}} (Eds.). \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{1180--1192}.
+\newblock
+\href{https://doi.org/10.1145/2998181.2998364}{doi:\nolinkurl{10.1145/2998181.2998364}}
+
+
+\bibitem[Yesilada et~al\mbox{.}(2012)]%
+        {DBLP:conf/w4a/YesiladaBVH12}
+\bibfield{author}{\bibinfo{person}{Yeliz Yesilada}, \bibinfo{person}{Giorgio Brajnik}, \bibinfo{person}{Markel Vigo}, {and} \bibinfo{person}{Simon Harper}.} \bibinfo{year}{2012}\natexlab{}.
+\newblock \showarticletitle{Understanding web accessibility and its drivers}. In \bibinfo{booktitle}{\emph{International Cross-Disciplinary Conference on Web Accessibility, {W4A} '12, Lyon, France, April 16-17, 2012}}, \bibfield{editor}{\bibinfo{person}{Markel Vigo}, \bibinfo{person}{Julio Abascal}, \bibinfo{person}{Rui Lopes}, {and} \bibinfo{person}{Paola Salomoni}} (Eds.). \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{19}.
+\newblock
+\href{https://doi.org/10.1145/2207016.2207027}{doi:\nolinkurl{10.1145/2207016.2207027}}
+
+
+\bibitem[Yesilada and Harper(2019)]%
+        {DBLP:series/hci/YesiladaH19}
+\bibfield{editor}{\bibinfo{person}{Yeliz Yesilada} {and} \bibinfo{person}{Simon Harper}} (Eds.). \bibinfo{year}{2019}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Web Accessibility - {A} Foundation for Research, Second Edition}}.
+\newblock \bibinfo{publisher}{Springer}.
+\newblock
+\showISBNx{978-1-4471-7439-4}
+\href{https://doi.org/10.1007/978-1-4471-7440-0}{doi:\nolinkurl{10.1007/978-1-4471-7440-0}}
+
+
+\bibitem[Zhou et~al\mbox{.}(2024)]%
+        {DBLP:conf/www/0002LJND24}
+\bibfield{author}{\bibinfo{person}{Yujia Zhou}, \bibinfo{person}{Zheng Liu}, \bibinfo{person}{Jiajie Jin}, \bibinfo{person}{Jian{-}Yun Nie}, {and} \bibinfo{person}{Zhicheng Dou}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Metacognitive Retrieval-Augmented Large Language Models}. In \bibinfo{booktitle}{\emph{Proceedings of the {ACM} on Web Conference 2024, {WWW} 2024, Singapore, May 13-17, 2024}}, \bibfield{editor}{\bibinfo{person}{Tat{-}Seng Chua}, \bibinfo{person}{Chong{-}Wah Ngo}, \bibinfo{person}{Ravi Kumar}, \bibinfo{person}{Hady~W. Lauw}, {and} \bibinfo{person}{Roy~Ka{-}Wei Lee}} (Eds.). \bibinfo{publisher}{{ACM}}, \bibinfo{pages}{1453--1463}.
+\newblock
+\href{https://doi.org/10.1145/3589334.3645481}{doi:\nolinkurl{10.1145/3589334.3645481}}
+
+
+\end{thebibliography}
