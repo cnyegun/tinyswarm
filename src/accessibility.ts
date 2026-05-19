@@ -1,5 +1,11 @@
 import { AxeBuilder } from "@axe-core/playwright";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { createServer, type Server } from "node:http";
 import { chromium, type Page } from "playwright";
@@ -21,7 +27,7 @@ const reviewers = [
   { id: "semantic", name: "screen-reader/semantic structure reviewer" },
   { id: "keyboard", name: "keyboard and motor access reviewer" },
   { id: "cognitive", name: "cognitive load and task clarity reviewer" },
-  { id: "visual", name: "low-vision, contrast, zoom, mobile reviewer" }
+  { id: "visual", name: "low-vision, contrast, zoom, mobile reviewer" },
 ];
 
 export const accessibilityProfile: SwarmProfile = {
@@ -30,7 +36,9 @@ export const accessibilityProfile: SwarmProfile = {
   reviewers,
   scan,
   check,
-  briefPrompt: ({ runDir }) => `You are the swarm orchestrator for an accessibility remediation run. Read the source page evidence and write a practical, preservation-focused accessibility brief for specialist reviewers and the fixer.
+  briefPrompt: ({
+    runDir,
+  }) => `You are the swarm orchestrator for an accessibility remediation run. Read the source page evidence and write a practical, preservation-focused accessibility brief for specialist reviewers and the fixer.
 
 Run directory: ${runDir}
 Inputs:
@@ -51,7 +59,10 @@ Write brief.md with these sections:
 - Acceptance bar: passing automated checks is required but not sufficient. Acceptable remediation must improve accessibility while preserving the original page identity and materially all user-relevant content.
 
 Be evidence-based. If something is uncertain, mark it as uncertain rather than turning it into a requirement. Write only files inside the run directory.`,
-  findingsPrompt: ({ runDir, iterDir, iteration }, reviewer) => `You are the ${reviewer.name}. Review iteration ${iteration} as a specialist accessibility detector. Your job is to produce specific, evidence-based findings, not generic advice.
+  findingsPrompt: (
+    { runDir, iterDir, iteration },
+    reviewer,
+  ) => `You are the ${reviewer.name}. Review iteration ${iteration} as a specialist accessibility detector. Your job is to produce specific, evidence-based findings, not generic advice.
 
 Run directory: ${runDir}
 Read original.html, facts.json, axe.json, brief.md, transformed.html if present, ${join(iterDir, "checks.json")} if present, and prior iteration artifacts if useful.
@@ -78,7 +89,11 @@ If no issue is proven, use an empty findings array and risk low. Do not edit tra
 
 Write exactly this JSON shape:
 { "role": "${reviewer.id}", "findings": ["id=${reviewer.id}-1 | category=... | severity=... | confidence=... | location=... | evidence=... | issue=... | suggestedFix=..."], "risk": "low" | "medium" | "high" }`,
-  aggregatePrompt: ({ runDir, iterDir, iteration }) => `You are the swarm orchestrator. Aggregate specialist findings for iteration ${iteration} into an evidence-first remediation task. Normalize, deduplicate, and prioritize; do not invent issues that reviewers did not support with evidence.
+  aggregatePrompt: ({
+    runDir,
+    iterDir,
+    iteration,
+  }) => `You are the swarm orchestrator. Aggregate specialist findings for iteration ${iteration} into an evidence-first remediation task. Normalize, deduplicate, and prioritize; do not invent issues that reviewers did not support with evidence.
 
 Run directory: ${runDir}
 Read brief.md, original.html, facts.json, axe.json, transformed.html if present, ${join(iterDir, "findings")}/*.json, and prior iterations if useful.
@@ -108,7 +123,11 @@ solver-task.md should tell the fixer exactly what to change and what not to chan
 - Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, preservationNotes, removedContent, and residualRisks if useful, while remaining simple JSON.
 
 Write only these files.`,
-  fixPrompt: ({ runDir, iterDir, iteration }) => `You are the fixer. Apply solver-task.md for iteration ${iteration}. Your output must be a faithful accessibility remediation of the original page, not a generic replacement landing page.
+  fixPrompt: ({
+    runDir,
+    iterDir,
+    iteration,
+  }) => `You are the fixer. Apply solver-task.md for iteration ${iteration}. Your output must be a faithful accessibility remediation of the original page, not a generic replacement landing page.
 
 Run directory: ${runDir}
 Read original.html, facts.json, axe.json, brief.md, ${join(iterDir, "aggregate-feedback.json")}, and ${join(iterDir, "solver-task.md")}.
@@ -140,7 +159,10 @@ Implementation guidance:
 
 solver-result.json must be valid JSON. Keep at least this compatible shape and add simple fields if helpful:
 { "changed": true, "summary": "string", "accessibilityFixes": ["string"], "preservationNotes": ["string"], "removedContent": ["string"], "residualRisks": ["string"] }`,
-  votePrompt: ({ runDir, iterDir }, reviewer) => `You are the ${reviewer.name}. Re-review transformed.html and vote on whether this candidate should be accepted.
+  votePrompt: (
+    { runDir, iterDir },
+    reviewer,
+  ) => `You are the ${reviewer.name}. Re-review transformed.html and vote on whether this candidate should be accepted.
 
 Run directory: ${runDir}
 Read transformed.html, ${join(iterDir, "checks.json")}, original.html, facts.json, axe.json, brief.md, ${join(iterDir, "aggregate-feedback.json")}, ${join(iterDir, "solver-task.md")}, and ${join(iterDir, "solver-result.json")}.
@@ -163,7 +185,11 @@ Score 0-100. Suggested scale: 90-100 accept with minor residual risk; 70-89 revi
 
 Write exactly this tiny JSON shape:
 { "vote": "accept" | "revise" | "block", "score": number, "reason": "short reason" }`,
-  decisionPrompt: ({ runDir, iterDir, iteration }) => `You are the swarm orchestrator. Decide whether iteration ${iteration} is done. Do not accept merely because automated checks pass.
+  decisionPrompt: ({
+    runDir,
+    iterDir,
+    iteration,
+  }) => `You are the swarm orchestrator. Decide whether iteration ${iteration} is done. Do not accept merely because automated checks pass.
 
 Run directory: ${runDir}
 Read ${join(iterDir, "checks.json")}, brief.md, ${join(iterDir, "aggregate-feedback.json")}, ${join(iterDir, "solver-task.md")}, ${join(iterDir, "solver-result.json")}, and ${join(iterDir, "votes")}/*.json.
@@ -181,7 +207,10 @@ Decision rules:
 - If the transformed page appears worse than original or destructive, prefer continue unless retry limits or repeated failures make stop_with_risks more honest.
 
 The reason should mention the decisive evidence: automated pass/fail, accept/block counts, major unresolved accessibility items, and preservation status.`,
-  reportPrompt: ({ runDir }, decision?: Decision) => `You are the swarm orchestrator. Write the final accessibility remediation report. The report should be useful for auditing, not just a success message.
+  reportPrompt: (
+    { runDir },
+    decision?: Decision,
+  ) => `You are the swarm orchestrator. Write the final accessibility remediation report. The report should be useful for auditing, not just a success message.
 
 Run directory: ${runDir}
 Final decision: ${JSON.stringify(decision || null)}
@@ -198,21 +227,31 @@ report.md should be concise but evidence-first. Include:
 - reviewer vote summary and any stop_with_risks rationale;
 - link/reference to transformed.html and key artifacts.
 
-report.html should be simple standalone HTML linking to transformed.html and artifacts. Do not overstate compliance. Say that passing axe is required evidence, not a full WCAG conformance claim. Write only these report files.`
+report.html should be simple standalone HTML linking to transformed.html and artifacts. Do not overstate compliance. Say that passing axe is required evidence, not a full WCAG conformance claim. Write only these report files.`,
 };
 
 async function scan(url: string, { runDir }: { runDir: string }) {
   mkdirSync(join(runDir, "screenshots"), { recursive: true });
   const browser = await chromium.launch();
   try {
-    const context = await browser.newContext({ viewport: { width: 1365, height: 900 } });
+    const context = await browser.newContext({
+      viewport: { width: 1365, height: 900 },
+    });
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => undefined);
+    await page
+      .waitForLoadState("networkidle", { timeout: 3000 })
+      .catch(() => undefined);
     const facts = await extractFacts(page);
     const axe = await new AxeBuilder({ page }).analyze();
-    await page.screenshot({ path: join(runDir, "screenshots", "original.png"), fullPage: true });
-    writeFileSync(join(runDir, "original.html"), absolutizeHtmlResources(await page.content(), page.url()));
+    await page.screenshot({
+      path: join(runDir, "screenshots", "original.png"),
+      fullPage: true,
+    });
+    writeFileSync(
+      join(runDir, "original.html"),
+      absolutizeHtmlResources(await page.content(), page.url()),
+    );
     writeFileSync(join(runDir, "facts.json"), JSON.stringify(facts, null, 2));
     writeFileSync(join(runDir, "axe.json"), JSON.stringify(axe, null, 2));
   } finally {
@@ -227,25 +266,66 @@ async function extractFacts(page: Page): Promise<Facts> {
       const h = e as HTMLElement;
       const r = h.getBoundingClientRect();
       const s = getComputedStyle(h);
-      return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0;
+      return (
+        s.display !== "none" &&
+        s.visibility !== "hidden" &&
+        r.width > 0 &&
+        r.height > 0
+      );
     };
-    const els = (sel: string, n: number) => Array.from(document.querySelectorAll(sel)).filter(visible).slice(0, n);
-    const text = (e: Element) => clean((e as HTMLElement).innerText || e.textContent);
+    const els = (sel: string, n: number) =>
+      Array.from(document.querySelectorAll(sel)).filter(visible).slice(0, n);
+    const text = (e: Element) =>
+      clean((e as HTMLElement).innerText || e.textContent);
     return {
       title: clean(document.title),
       url: location.href,
       lang: document.documentElement.lang || "",
-      headings: els("h1,h2,h3,h4,h5,h6", 60).map(e => ({ level: Number(e.tagName[1]), text: text(e) })),
-      links: els("a[href]", 100).map(e => ({ text: text(e) || clean(e.getAttribute("aria-label")) || clean(e.getAttribute("title")), href: (e as HTMLAnchorElement).href })),
-      buttons: els("button,[role=button],input[type=button],input[type=submit]", 60).map(e => ({ text: text(e) || clean(e.getAttribute("aria-label")) || clean((e as HTMLInputElement).value) })),
-      images: els("img", 80).map(e => ({ alt: clean((e as HTMLImageElement).alt), src: (e as HTMLImageElement).currentSrc || (e as HTMLImageElement).src })),
-      landmarks: els("header,nav,main,aside,footer,[role]", 60).map(e => ({ tag: e.tagName.toLowerCase(), role: e.getAttribute("role") || "", label: clean(e.getAttribute("aria-label")) || text(e).slice(0, 120) })),
-      textSnippets: Array.from(new Set((document.body?.innerText || "").split("\n").map(clean).filter(t => t.length > 30))).slice(0, 100)
+      headings: els("h1,h2,h3,h4,h5,h6", 60).map((e) => ({
+        level: Number(e.tagName[1]),
+        text: text(e),
+      })),
+      links: els("a[href]", 100).map((e) => ({
+        text:
+          text(e) ||
+          clean(e.getAttribute("aria-label")) ||
+          clean(e.getAttribute("title")),
+        href: (e as HTMLAnchorElement).href,
+      })),
+      buttons: els(
+        "button,[role=button],input[type=button],input[type=submit]",
+        60,
+      ).map((e) => ({
+        text:
+          text(e) ||
+          clean(e.getAttribute("aria-label")) ||
+          clean((e as HTMLInputElement).value),
+      })),
+      images: els("img", 80).map((e) => ({
+        alt: clean((e as HTMLImageElement).alt),
+        src: (e as HTMLImageElement).currentSrc || (e as HTMLImageElement).src,
+      })),
+      landmarks: els("header,nav,main,aside,footer,[role]", 60).map((e) => ({
+        tag: e.tagName.toLowerCase(),
+        role: e.getAttribute("role") || "",
+        label: clean(e.getAttribute("aria-label")) || text(e).slice(0, 120),
+      })),
+      textSnippets: Array.from(
+        new Set(
+          (document.body?.innerText || "")
+            .split("\n")
+            .map(clean)
+            .filter((t) => t.length > 30),
+        ),
+      ).slice(0, 100),
     };
   });
 }
 
-async function check({ runDir }: { runDir: string }, iteration: number): Promise<CheckResult> {
+async function check(
+  { runDir }: { runDir: string },
+  iteration: number,
+): Promise<CheckResult> {
   const failures: string[] = [];
   const htmlPath = join(runDir, "transformed.html");
   if (!existsSync(htmlPath)) failures.push("transformed.html missing");
@@ -256,26 +336,53 @@ async function check({ runDir }: { runDir: string }, iteration: number): Promise
   let axeViolations: unknown[] = [];
   let mobileOverflow = false;
   try {
-    const context = await browser.newContext({ viewport: { width: 1365, height: 900 } });
+    const context = await browser.newContext({
+      viewport: { width: 1365, height: 900 },
+    });
     const page = await context.newPage();
-    await page.goto(`http://localhost:${preview.port}/`, { waitUntil: "networkidle" });
-    dom = await page.evaluate(() => ({ title: document.title.trim(), h1: document.querySelectorAll("h1").length, main: !!document.querySelector("main") }));
+    await page.goto(`http://localhost:${preview.port}/`, {
+      waitUntil: "networkidle",
+    });
+    dom = await page.evaluate(() => ({
+      title: document.title.trim(),
+      h1: document.querySelectorAll("h1").length,
+      main: !!document.querySelector("main"),
+    }));
     if (!dom.title) failures.push("missing title");
     if (dom.h1 !== 1) failures.push(`expected one h1, found ${dom.h1}`);
     if (!dom.main) failures.push("missing main");
     const axe = await new AxeBuilder({ page }).analyze();
     axeViolations = axe.violations;
     for (const v of axe.violations) failures.push(`axe ${v.id}: ${v.help}`);
-    await page.screenshot({ path: join(runDir, "screenshots", `transformed-${String(iteration).padStart(3, "0")}.png`), fullPage: true });
+    await page.screenshot({
+      path: join(
+        runDir,
+        "screenshots",
+        `transformed-${String(iteration).padStart(3, "0")}.png`,
+      ),
+      fullPage: true,
+    });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`http://localhost:${preview.port}/`, { waitUntil: "networkidle" });
-    mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+    await page.goto(`http://localhost:${preview.port}/`, {
+      waitUntil: "networkidle",
+    });
+    mobileOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1,
+    );
     if (mobileOverflow) failures.push("mobile horizontal overflow");
   } finally {
     await browser.close();
     preview.server.close();
   }
-  return { passed: failures.length === 0, failures, title: dom.title, h1: dom.h1, main: dom.main, mobileOverflow, axeViolations };
+  return {
+    passed: failures.length === 0,
+    failures,
+    title: dom.title,
+    h1: dom.h1,
+    main: dom.main,
+    mobileOverflow,
+    axeViolations,
+  };
 }
 
 function normalizeHtmlFile(file: string, baseUrl: string) {
@@ -287,7 +394,9 @@ function normalizeHtmlFile(file: string, baseUrl: string) {
 
 function originalUrl(runDir: string) {
   try {
-    const facts = JSON.parse(readFileSync(join(runDir, "facts.json"), "utf8")) as { url?: unknown };
+    const facts = JSON.parse(
+      readFileSync(join(runDir, "facts.json"), "utf8"),
+    ) as { url?: unknown };
     return typeof facts.url === "string" ? facts.url : "";
   } catch {
     return "";
@@ -296,30 +405,58 @@ function originalUrl(runDir: string) {
 
 function absolutizeHtmlResources(html: string, baseUrl: string) {
   return html
-    .replace(/(\s(?:href|src)=)(["'])([^"']*)\2/gi, (_match, prefix: string, quote: string, value: string) => `${prefix}${quote}${absolutizeUrl(value, baseUrl)}${quote}`)
-    .replace(/(\ssrcset=)(["'])([^"']*)\2/gi, (_match, prefix: string, quote: string, value: string) => `${prefix}${quote}${absolutizeSrcset(value, baseUrl)}${quote}`)
-    .replace(/url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi, (_match, quote: string, value: string) => `url(${quote}${absolutizeUrl(value, baseUrl)}${quote})`);
+    .replace(
+      /(\s(?:href|src)=)(["'])([^"']*)\2/gi,
+      (_match, prefix: string, quote: string, value: string) =>
+        `${prefix}${quote}${absolutizeUrl(value, baseUrl)}${quote}`,
+    )
+    .replace(
+      /(\ssrcset=)(["'])([^"']*)\2/gi,
+      (_match, prefix: string, quote: string, value: string) =>
+        `${prefix}${quote}${absolutizeSrcset(value, baseUrl)}${quote}`,
+    )
+    .replace(
+      /url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi,
+      (_match, quote: string, value: string) =>
+        `url(${quote}${absolutizeUrl(value, baseUrl)}${quote})`,
+    );
 }
 
 function absolutizeSrcset(value: string, baseUrl: string) {
-  return value.split(",").map(candidate => {
-    const trimmed = candidate.trim();
-    const [url, ...descriptor] = trimmed.split(/\s+/);
-    return [absolutizeUrl(url, baseUrl), ...descriptor].join(" ");
-  }).join(", ");
+  return value
+    .split(",")
+    .map((candidate) => {
+      const trimmed = candidate.trim();
+      const [url, ...descriptor] = trimmed.split(/\s+/);
+      return [absolutizeUrl(url, baseUrl), ...descriptor].join(" ");
+    })
+    .join(", ");
 }
 
 function absolutizeUrl(value: string, baseUrl: string) {
   if (!value.startsWith("/") || value.startsWith("//")) return value;
-  try { return new URL(value, baseUrl).href; } catch { return value; }
+  try {
+    return new URL(value, baseUrl).href;
+  } catch {
+    return value;
+  }
 }
 
 async function serve(runDir: string, preferredPort: number) {
   const root = resolve(runDir);
   const server = createServer((req, res) => {
-    const path = decodeURIComponent(new URL(req.url || "/", "http://local").pathname);
-    const file = path === "/" ? join(runDir, "transformed.html") : resolve(root, `.${path}`);
-    if (!(file === root || file.startsWith(`${root}/`)) || !existsSync(file) || !statSync(file).isFile()) {
+    const path = decodeURIComponent(
+      new URL(req.url || "/", "http://local").pathname,
+    );
+    const file =
+      path === "/"
+        ? join(runDir, "transformed.html")
+        : resolve(root, `.${path}`);
+    if (
+      !(file === root || file.startsWith(`${root}/`)) ||
+      !existsSync(file) ||
+      !statSync(file).isFile()
+    ) {
       res.writeHead(404).end("Not found");
       return;
     }
@@ -333,6 +470,9 @@ async function serve(runDir: string, preferredPort: number) {
 function listen(server: Server, port: number) {
   return new Promise<number>((resolveListen, reject) => {
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolveListen((server.address() as { port: number }).port); });
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolveListen((server.address() as { port: number }).port);
+    });
   });
 }

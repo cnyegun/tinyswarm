@@ -1,5 +1,17 @@
-import { createOpencode, createOpencodeClient, type OpencodeClient, type PermissionRuleset } from "@opencode-ai/sdk/v2";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  createOpencode,
+  createOpencodeClient,
+  type OpencodeClient,
+  type PermissionRuleset,
+} from "@opencode-ai/sdk/v2";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:http";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
@@ -219,7 +231,9 @@ type OutputState = {
 };
 
 /** Grants every permission to every file pattern; applied to all swarm sessions. */
-const allowAll: PermissionRuleset = [{ permission: "*", pattern: "*", action: "allow" }];
+const allowAll: PermissionRuleset = [
+  { permission: "*", pattern: "*", action: "allow" },
+];
 
 /** Singleton opencode harness; initialized once per {@link runSwarm} call, reset in `finally`. */
 let harness: Harness | undefined;
@@ -268,9 +282,20 @@ let started = Date.now();
  * await runSwarm(myProfile, "https://example.com", process.cwd());
  * ```
  */
-export async function runSwarm(profile: SwarmProfile, input: string, rootDir: string) {
-  const maxIterations = Math.max(1, Number(process.env.SWARM_MAX_ITERATIONS || 3));
-  const runDir = join(rootDir, "runs", new Date().toISOString().replace(/[:.]/g, "-"));
+export async function runSwarm(
+  profile: SwarmProfile,
+  input: string,
+  rootDir: string,
+) {
+  const maxIterations = Math.max(
+    1,
+    Number(process.env.SWARM_MAX_ITERATIONS || 3),
+  );
+  const runDir = join(
+    rootDir,
+    "runs",
+    new Date().toISOString().replace(/[:.]/g, "-"),
+  );
   mkdirSync(runDir, { recursive: true });
   logFile = join(runDir, "swarm.log");
   started = Date.now();
@@ -278,7 +303,9 @@ export async function runSwarm(profile: SwarmProfile, input: string, rootDir: st
 
   console.log(`Run: ${shown(rootDir, runDir)}`);
   console.log(`Log: ${shown(rootDir, logFile)}`);
-  console.log(`Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`);
+  console.log(
+    `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
+  );
 
   log("run", "starting", {
     profile: profile.id,
@@ -291,7 +318,7 @@ export async function runSwarm(profile: SwarmProfile, input: string, rootDir: st
     variant: model.variant,
     timeoutMs: Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000),
     pid: process.pid,
-    node: process.version
+    node: process.version,
   });
 
   try {
@@ -301,18 +328,46 @@ export async function runSwarm(profile: SwarmProfile, input: string, rootDir: st
     progress("scan", `start url=${input}`);
     try {
       await profile.scan(input, ctx);
-      progress("scan", `done ${duration(scanStarted)} ${artifactSummary(rootDir, ["original.html", "facts.json", "axe.json", join("screenshots", "original.png")].map(path => join(runDir, path)))}`);
+      progress(
+        "scan",
+        `done ${duration(scanStarted)} ${artifactSummary(
+          rootDir,
+          [
+            "original.html",
+            "facts.json",
+            "axe.json",
+            join("screenshots", "original.png"),
+          ].map((path) => join(runDir, path)),
+        )}`,
+      );
       log("scan", "done", {
         elapsedMs: Date.now() - scanStarted,
-        artifacts: ["original.html", "facts.json", "axe.json", join("screenshots", "original.png")].map(path => fileState(rootDir, join(runDir, path)))
+        artifacts: [
+          "original.html",
+          "facts.json",
+          "axe.json",
+          join("screenshots", "original.png"),
+        ].map((path) => fileState(rootDir, join(runDir, path))),
       });
     } catch (error) {
-      log("scan", "failed", { elapsedMs: Date.now() - scanStarted, error: describe(error) });
+      log("scan", "failed", {
+        elapsedMs: Date.now() - scanStarted,
+        error: describe(error),
+      });
       throw error;
     }
 
     const active = await ensureHarness(rootDir, runDir);
-    await promptAgent(active, rootDir, "orchestrator", "brief", runDir, join(runDir, "prompts", "brief.md"), [join(runDir, "brief.md")], profile.briefPrompt(ctx));
+    await promptAgent(
+      active,
+      rootDir,
+      "orchestrator",
+      "brief",
+      runDir,
+      join(runDir, "prompts", "brief.md"),
+      [join(runDir, "brief.md")],
+      profile.briefPrompt(ctx),
+    );
 
     let lastDecision: Decision | undefined;
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -320,23 +375,51 @@ export async function runSwarm(profile: SwarmProfile, input: string, rootDir: st
       const iterCtx = { rootDir, runDir, iterDir, iteration };
       mkdirSync(join(iterDir, "findings"), { recursive: true });
       mkdirSync(join(iterDir, "votes"), { recursive: true });
-      log("iteration", "start", { iteration, iterDir: shown(rootDir, iterDir) });
+      log("iteration", "start", {
+        iteration,
+        iterDir: shown(rootDir, iterDir),
+      });
       progress(`iteration ${iteration}/${maxIterations}`, "start");
 
       // All reviewers run independently; parallelize to cut wall-clock time.
-      await Promise.all(profile.reviewers.map(reviewer => promptAgent(
+      await Promise.all(
+        profile.reviewers.map((reviewer) =>
+          promptAgent(
+            active,
+            rootDir,
+            reviewer.id,
+            "findings",
+            runDir,
+            join(iterDir, "prompts", `${reviewer.id}-findings.md`),
+            [join(iterDir, "findings", `${reviewer.id}.json`)],
+            profile.findingsPrompt(iterCtx, reviewer),
+          ),
+        ),
+      );
+
+      await promptAgent(
         active,
         rootDir,
-        reviewer.id,
-        "findings",
+        "orchestrator",
+        "aggregate",
         runDir,
-        join(iterDir, "prompts", `${reviewer.id}-findings.md`),
-        [join(iterDir, "findings", `${reviewer.id}.json`)],
-        profile.findingsPrompt(iterCtx, reviewer)
-      )));
-
-      await promptAgent(active, rootDir, "orchestrator", "aggregate", runDir, join(iterDir, "prompts", "aggregate.md"), [join(iterDir, "aggregate-feedback.json"), join(iterDir, "solver-task.md")], profile.aggregatePrompt(iterCtx));
-      await promptAgent(active, rootDir, "fixer", "fix", runDir, join(iterDir, "prompts", "fix.md"), [join(runDir, profile.artifact), join(iterDir, "solver-result.json")], profile.fixPrompt(iterCtx));
+        join(iterDir, "prompts", "aggregate.md"),
+        [
+          join(iterDir, "aggregate-feedback.json"),
+          join(iterDir, "solver-task.md"),
+        ],
+        profile.aggregatePrompt(iterCtx),
+      );
+      await promptAgent(
+        active,
+        rootDir,
+        "fixer",
+        "fix",
+        runDir,
+        join(iterDir, "prompts", "fix.md"),
+        [join(runDir, profile.artifact), join(iterDir, "solver-result.json")],
+        profile.fixPrompt(iterCtx),
+      );
 
       const checkStarted = Date.now();
       log("check", "start", { iteration });
@@ -345,54 +428,110 @@ export async function runSwarm(profile: SwarmProfile, input: string, rootDir: st
       try {
         checks = await profile.check(ctx, iteration);
       } catch (error) {
-        log("check", "failed", { iteration, elapsedMs: Date.now() - checkStarted, error: describe(error) });
+        log("check", "failed", {
+          iteration,
+          elapsedMs: Date.now() - checkStarted,
+          error: describe(error),
+        });
         throw error;
       }
-      writeFileSync(join(iterDir, "checks.json"), JSON.stringify(checks, null, 2));
-      log("check", checks.passed ? "passed" : "failed", { iteration, elapsedMs: Date.now() - checkStarted, failures: checks.failures.length, output: fileState(rootDir, join(iterDir, "checks.json")) });
-      progress("check", `${checks.passed ? "passed" : "failed"} ${duration(checkStarted)} failures=${checks.failures.length}`);
-      for (const failure of checks.failures.slice(0, 3)) progress("check", `failure: ${failure}`);
-      if (checks.failures.length > 3) progress("check", `...${checks.failures.length - 3} more failures in checks.json`);
+      writeFileSync(
+        join(iterDir, "checks.json"),
+        JSON.stringify(checks, null, 2),
+      );
+      log("check", checks.passed ? "passed" : "failed", {
+        iteration,
+        elapsedMs: Date.now() - checkStarted,
+        failures: checks.failures.length,
+        output: fileState(rootDir, join(iterDir, "checks.json")),
+      });
+      progress(
+        "check",
+        `${checks.passed ? "passed" : "failed"} ${duration(checkStarted)} failures=${checks.failures.length}`,
+      );
+      for (const failure of checks.failures.slice(0, 3))
+        progress("check", `failure: ${failure}`);
+      if (checks.failures.length > 3)
+        progress(
+          "check",
+          `...${checks.failures.length - 3} more failures in checks.json`,
+        );
 
       // Votes are also independent; parallelize the same way as findings.
-      await Promise.all(profile.reviewers.map(reviewer => promptAgent(
-        active,
-        rootDir,
-        reviewer.id,
-        "vote",
-        runDir,
-        join(iterDir, "prompts", `${reviewer.id}-vote.md`),
-        [join(iterDir, "votes", `${reviewer.id}.json`)],
-        profile.votePrompt(iterCtx, reviewer)
-      )));
+      await Promise.all(
+        profile.reviewers.map((reviewer) =>
+          promptAgent(
+            active,
+            rootDir,
+            reviewer.id,
+            "vote",
+            runDir,
+            join(iterDir, "prompts", `${reviewer.id}-vote.md`),
+            [join(iterDir, "votes", `${reviewer.id}.json`)],
+            profile.votePrompt(iterCtx, reviewer),
+          ),
+        ),
+      );
 
       const decisionFile = join(iterDir, "decision.json");
-      await promptAgent(active, rootDir, "orchestrator", "decision", runDir, join(iterDir, "prompts", "decision.md"), [decisionFile], profile.decisionPrompt(iterCtx));
+      await promptAgent(
+        active,
+        rootDir,
+        "orchestrator",
+        "decision",
+        runDir,
+        join(iterDir, "prompts", "decision.md"),
+        [decisionFile],
+        profile.decisionPrompt(iterCtx),
+      );
       lastDecision = readDecision(decisionFile);
 
       // Cap a lingering "continue" at the last iteration so the outer caller
       // always gets a terminal outcome regardless of the orchestrator's vote.
       if (lastDecision.outcome === "continue" && iteration === maxIterations) {
-        lastDecision = { ...lastDecision, outcome: "stop_with_risks", reason: `max iterations reached: ${lastDecision.reason}` };
+        lastDecision = {
+          ...lastDecision,
+          outcome: "stop_with_risks",
+          reason: `max iterations reached: ${lastDecision.reason}`,
+        };
         writeFileSync(decisionFile, JSON.stringify(lastDecision, null, 2));
       }
       log("decision", lastDecision.outcome, lastDecision);
-      progress("decision", `outcome=${lastDecision.outcome} checksPass=${lastDecision.checksPass} accepts=${lastDecision.accepts} blocks=${lastDecision.blocks} reason=${quote(lastDecision.reason)}`);
+      progress(
+        "decision",
+        `outcome=${lastDecision.outcome} checksPass=${lastDecision.checksPass} accepts=${lastDecision.accepts} blocks=${lastDecision.blocks} reason=${quote(lastDecision.reason)}`,
+      );
       if (lastDecision.outcome !== "continue") break;
     }
 
-    await promptAgent(active, rootDir, "orchestrator", "report", runDir, join(runDir, "prompts", "report.md"), [join(runDir, "report.md"), join(runDir, "report.html")], profile.reportPrompt(ctx, lastDecision));
+    await promptAgent(
+      active,
+      rootDir,
+      "orchestrator",
+      "report",
+      runDir,
+      join(runDir, "prompts", "report.md"),
+      [join(runDir, "report.md"), join(runDir, "report.html")],
+      profile.reportPrompt(ctx, lastDecision),
+    );
     const served = await serve(runDir, profile.artifact);
-    log("run", "completed", { decision: lastDecision, artifact: fileState(rootDir, join(runDir, profile.artifact)), report: fileState(rootDir, join(runDir, "report.html")) });
+    log("run", "completed", {
+      decision: lastDecision,
+      artifact: fileState(rootDir, join(runDir, profile.artifact)),
+      report: fileState(rootDir, join(runDir, "report.html")),
+    });
     console.log(`Run: ${shown(rootDir, runDir)}`);
     console.log(`Brief: ${shown(rootDir, join(runDir, "brief.md"))}`);
     console.log(`Report: ${shown(rootDir, join(runDir, "report.html"))}`);
-    console.log(`Transformed: ${shown(rootDir, join(runDir, profile.artifact))}`);
+    console.log(
+      `Transformed: ${shown(rootDir, join(runDir, profile.artifact))}`,
+    );
     console.log(`Log: ${shown(rootDir, logFile)}`);
     console.log(`Local: http://localhost:${served.port}`);
   } finally {
     if (harness?.close) log("opencode", "closing server", { url: harness.url });
-    else if (harness) log("opencode", "leaving external server open", { url: harness.url });
+    else if (harness)
+      log("opencode", "leaving external server open", { url: harness.url });
     harness?.close?.();
     harness = undefined;
   }
@@ -412,25 +551,60 @@ export async function runSwarm(profile: SwarmProfile, input: string, rootDir: st
  * @returns The initialized harness with a live SDK client.
  * @throws If `createOpencode` fails to start the embedded server.
  */
-async function ensureHarness(rootDir: string, runDir: string): Promise<Harness> {
+async function ensureHarness(
+  rootDir: string,
+  runDir: string,
+): Promise<Harness> {
   if (harness) {
-    log("opencode", "reusing harness", { url: harness.url, sessions: Object.keys(harness.sessions).length });
+    log("opencode", "reusing harness", {
+      url: harness.url,
+      sessions: Object.keys(harness.sessions).length,
+    });
     return harness;
   }
-  const url = process.env.SWARM_OPENCODE_SERVER_URL || process.env.TINY_OPENCODE_SERVER_URL;
+  const url =
+    process.env.SWARM_OPENCODE_SERVER_URL ||
+    process.env.TINY_OPENCODE_SERVER_URL;
   if (url) {
-    harness = { client: createOpencodeClient({ baseUrl: url }), url, sessions: {} };
+    harness = {
+      client: createOpencodeClient({ baseUrl: url }),
+      url,
+      sessions: {},
+    };
     log("opencode", "using existing server", { url });
     return harness;
   }
   const serverStarted = Date.now();
-  log("opencode", "starting server", { hostname: "127.0.0.1", port: 0, timeout: 30000, permission: "allow" });
-  const startedServer = await createOpencode({ hostname: "127.0.0.1", port: 0, timeout: 30000, config: { permission: "allow" } }).catch((error: unknown) => {
-    log("opencode", "start threw", { elapsedMs: Date.now() - serverStarted, error: describe(error) });
+  log("opencode", "starting server", {
+    hostname: "127.0.0.1",
+    port: 0,
+    timeout: 30000,
+    permission: "allow",
+  });
+  const startedServer = await createOpencode({
+    hostname: "127.0.0.1",
+    port: 0,
+    timeout: 30000,
+    config: { permission: "allow" },
+  }).catch((error: unknown) => {
+    log("opencode", "start threw", {
+      elapsedMs: Date.now() - serverStarted,
+      error: describe(error),
+    });
     throw error;
   });
-  harness = { client: startedServer.client, url: startedServer.server.url, close: startedServer.server.close, sessions: {} };
-  log("opencode", "started server", { url: harness.url, permission: "allow", run: shown(rootDir, runDir), elapsedMs: Date.now() - serverStarted });
+  harness = {
+    client: startedServer.client,
+    url: startedServer.server.url,
+    close: startedServer.server.close,
+    sessions: {},
+  };
+  log("opencode", "started server", {
+    url: harness.url,
+    permission: "allow",
+    run: shown(rootDir, runDir),
+    elapsedMs: Date.now() - serverStarted,
+  });
   return harness;
 }
 
@@ -448,7 +622,12 @@ async function ensureHarness(rootDir: string, runDir: string): Promise<Harness> 
  * @returns The opencode session ID string.
  * @throws If the SDK call returns an error response.
  */
-async function sessionFor(active: Harness, rootDir: string, key: string, runDir: string) {
+async function sessionFor(
+  active: Harness,
+  rootDir: string,
+  key: string,
+  runDir: string,
+) {
   if (active.sessions[key]) {
     log("session", "reuse", { key, id: active.sessions[key] });
     return active.sessions[key];
@@ -457,24 +636,53 @@ async function sessionFor(active: Harness, rootDir: string, key: string, runDir:
   const agent = process.env.SWARM_AGENT || "build";
   const title = `swarm ${key} ${relative(rootDir, runDir)}`;
   const sessionStarted = Date.now();
-  log("session", "create start", { key, title, agent, model: modelName(model), variant: model.variant, permission: "allow-all" });
-  const result = await active.client.session.create({
-    directory: rootDir,
+  log("session", "create start", {
+    key,
     title,
     agent,
-    model: { providerID: model.providerID, id: model.modelID, variant: model.variant },
-    permission: allowAll
-  }).catch((error: unknown) => {
-    log("session", "create threw", { key, elapsedMs: Date.now() - sessionStarted, error: describe(error) });
-    throw error;
+    model: modelName(model),
+    variant: model.variant,
+    permission: "allow-all",
   });
+  const result = await active.client.session
+    .create({
+      directory: rootDir,
+      title,
+      agent,
+      model: {
+        providerID: model.providerID,
+        id: model.modelID,
+        variant: model.variant,
+      },
+      permission: allowAll,
+    })
+    .catch((error: unknown) => {
+      log("session", "create threw", {
+        key,
+        elapsedMs: Date.now() - sessionStarted,
+        error: describe(error),
+      });
+      throw error;
+    });
   if (result.error) {
-    log("session", "create error", { key, elapsedMs: Date.now() - sessionStarted, error: describe(result.error) });
+    log("session", "create error", {
+      key,
+      elapsedMs: Date.now() - sessionStarted,
+      error: describe(result.error),
+    });
     throw new Error(`session create failed: ${describe(result.error)}`);
   }
   active.sessions[key] = result.data.id;
-  writeFileSync(join(runDir, "sessions.json"), JSON.stringify(active.sessions, null, 2));
-  log("session", "created", { key, id: result.data.id, elapsedMs: Date.now() - sessionStarted, sessionsFile: fileState(rootDir, join(runDir, "sessions.json")) });
+  writeFileSync(
+    join(runDir, "sessions.json"),
+    JSON.stringify(active.sessions, null, 2),
+  );
+  log("session", "created", {
+    key,
+    id: result.data.id,
+    elapsedMs: Date.now() - sessionStarted,
+    sessionsFile: fileState(rootDir, join(runDir, "sessions.json")),
+  });
   return result.data.id;
 }
 
@@ -498,7 +706,16 @@ async function sessionFor(active: Harness, rootDir: string, key: string, runDir:
  * @param text - The full prompt text to send.
  * @throws If the SDK rejects the prompt or if outputs do not appear before `SWARM_AGENT_TIMEOUT_MS`.
  */
-async function promptAgent(active: Harness, rootDir: string, key: string, phase: string, runDir: string, promptFile: string, outputs: string[], text: string) {
+async function promptAgent(
+  active: Harness,
+  rootDir: string,
+  key: string,
+  phase: string,
+  runDir: string,
+  promptFile: string,
+  outputs: string[],
+  text: string,
+) {
   const sessionID = await sessionFor(active, rootDir, key, runDir);
   const model = modelSpec();
   const agent = process.env.SWARM_AGENT || "build";
@@ -506,7 +723,10 @@ async function promptAgent(active: Harness, rootDir: string, key: string, phase:
   mkdirSync(dirname(promptFile), { recursive: true });
   writeFileSync(promptFile, text);
   const promptStarted = Date.now();
-  progress(phase, `${key} session=${shortID(sessionID)} outputs=${outputs.map(outputName).join(",")} prompt=${formatBytes(Buffer.byteLength(text, "utf8"))}`);
+  progress(
+    phase,
+    `${key} session=${shortID(sessionID)} outputs=${outputs.map(outputName).join(",")} prompt=${formatBytes(Buffer.byteLength(text, "utf8"))}`,
+  );
   log("prompt", "start", {
     key,
     sessionID,
@@ -516,28 +736,59 @@ async function promptAgent(active: Harness, rootDir: string, key: string, phase:
     variant: model.variant,
     promptFile: shown(rootDir, promptFile),
     promptBytes: Buffer.byteLength(text, "utf8"),
-    outputs: outputStates(rootDir, outputs, before)
+    outputs: outputStates(rootDir, outputs, before),
   });
-  const result = await active.client.session.promptAsync({
-    sessionID,
-    directory: rootDir,
-    agent,
-    model: { providerID: model.providerID, modelID: model.modelID },
-    variant: model.variant,
-    parts: [{ type: "text", text }]
-  }).catch((error: unknown) => {
-    log("prompt", "submit threw", { key, sessionID, elapsedMs: Date.now() - promptStarted, error: describe(error) });
-    throw error;
-  });
+  const result = await active.client.session
+    .promptAsync({
+      sessionID,
+      directory: rootDir,
+      agent,
+      model: { providerID: model.providerID, modelID: model.modelID },
+      variant: model.variant,
+      parts: [{ type: "text", text }],
+    })
+    .catch((error: unknown) => {
+      log("prompt", "submit threw", {
+        key,
+        sessionID,
+        elapsedMs: Date.now() - promptStarted,
+        error: describe(error),
+      });
+      throw error;
+    });
   if (result.error) {
-    log("prompt", "submit error", { key, sessionID, elapsedMs: Date.now() - promptStarted, error: describe(result.error) });
-    throw new Error(`session prompt failed for ${key}: ${describe(result.error)}`);
+    log("prompt", "submit error", {
+      key,
+      sessionID,
+      elapsedMs: Date.now() - promptStarted,
+      error: describe(result.error),
+    });
+    throw new Error(
+      `session prompt failed for ${key}: ${describe(result.error)}`,
+    );
   }
-  log("prompt", "accepted", { key, sessionID, elapsedMs: Date.now() - promptStarted, response: summarizeData(result.data) });
+  log("prompt", "accepted", {
+    key,
+    sessionID,
+    elapsedMs: Date.now() - promptStarted,
+    response: summarizeData(result.data),
+  });
   progress(phase, `${key} accepted in ${duration(promptStarted)}`);
-  const finalOutputs = await waitForOutputs(rootDir, outputs, before, { key, phase, sessionID });
-  log("prompt", "done", { key, sessionID, elapsedMs: Date.now() - promptStarted, outputs: finalOutputs });
-  progress(phase, `${key} done ${duration(promptStarted)} ${formatStates(finalOutputs)}`);
+  const finalOutputs = await waitForOutputs(rootDir, outputs, before, {
+    key,
+    phase,
+    sessionID,
+  });
+  log("prompt", "done", {
+    key,
+    sessionID,
+    elapsedMs: Date.now() - promptStarted,
+    outputs: finalOutputs,
+  });
+  progress(
+    phase,
+    `${key} done ${duration(promptStarted)} ${formatStates(finalOutputs)}`,
+  );
 }
 
 /**
@@ -548,7 +799,12 @@ async function promptAgent(active: Harness, rootDir: string, key: string, phase:
  * @returns Map from path to `mtimeMs` (0 if not present).
  */
 function outputTimes(outputs: string[]) {
-  return new Map(outputs.map(path => [path, existsSync(path) ? statSync(path).mtimeMs : 0]));
+  return new Map(
+    outputs.map((path) => [
+      path,
+      existsSync(path) ? statSync(path).mtimeMs : 0,
+    ]),
+  );
 }
 
 /**
@@ -559,11 +815,19 @@ function outputTimes(outputs: string[]) {
  * @param outputs - Absolute file paths to inspect.
  * @param before - Baseline mtime map from {@link outputTimes}.
  */
-function outputStates(rootDir: string, outputs: string[], before: Map<string, number>): OutputState[] {
-  return outputs.map(path => {
+function outputStates(
+  rootDir: string,
+  outputs: string[],
+  before: Map<string, number>,
+): OutputState[] {
+  return outputs.map((path) => {
     const previousMtimeMs = before.get(path) || 0;
     const state = fileState(rootDir, path);
-    return { ...state, previousMtimeMs, changed: state.exists && (state.mtimeMs || 0) > previousMtimeMs };
+    return {
+      ...state,
+      previousMtimeMs,
+      changed: state.exists && (state.mtimeMs || 0) > previousMtimeMs,
+    };
   });
 }
 
@@ -576,7 +840,12 @@ function outputStates(rootDir: string, outputs: string[], before: Map<string, nu
 function fileState(rootDir: string, path: string) {
   if (!existsSync(path)) return { path: shown(rootDir, path), exists: false };
   const stat = statSync(path);
-  return { path: shown(rootDir, path), exists: true, size: stat.size, mtimeMs: stat.mtimeMs };
+  return {
+    path: shown(rootDir, path),
+    exists: true,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+  };
 }
 
 /**
@@ -593,24 +862,50 @@ function fileState(rootDir: string, path: string) {
  * @returns Resolves with the final {@link OutputState} array once all outputs are present.
  * @throws `Error` if `SWARM_AGENT_TIMEOUT_MS` elapses before all outputs appear.
  */
-async function waitForOutputs(rootDir: string, outputs: string[], before: Map<string, number>, details: { key: string; phase: string; sessionID: string }): Promise<OutputState[]> {
+async function waitForOutputs(
+  rootDir: string,
+  outputs: string[],
+  before: Map<string, number>,
+  details: { key: string; phase: string; sessionID: string },
+): Promise<OutputState[]> {
   const timeoutMs = Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000);
-  const logIntervalMs = Math.max(1000, Number(process.env.SWARM_WAIT_LOG_INTERVAL_MS || 10000));
+  const logIntervalMs = Math.max(
+    1000,
+    Number(process.env.SWARM_WAIT_LOG_INTERVAL_MS || 10000),
+  );
   const startedAt = Date.now();
   let nextLogAt = startedAt + logIntervalMs;
-  log("prompt", "wait start", { ...details, timeoutMs, logIntervalMs, outputs: outputStates(rootDir, outputs, before) });
+  log("prompt", "wait start", {
+    ...details,
+    timeoutMs,
+    logIntervalMs,
+    outputs: outputStates(rootDir, outputs, before),
+  });
   while (Date.now() - startedAt < timeoutMs) {
     const states = outputStates(rootDir, outputs, before);
-    if (states.every(state => state.exists && state.changed)) return states;
+    if (states.every((state) => state.exists && state.changed)) return states;
     if (Date.now() >= nextLogAt) {
-      log("prompt", "wait", { ...details, elapsedMs: Date.now() - startedAt, outputs: states });
-      progress(details.phase, `${details.key} ${waitSummary(states, startedAt)}`);
+      log("prompt", "wait", {
+        ...details,
+        elapsedMs: Date.now() - startedAt,
+        outputs: states,
+      });
+      progress(
+        details.phase,
+        `${details.key} ${waitSummary(states, startedAt)}`,
+      );
       nextLogAt = Date.now() + logIntervalMs;
     }
     await sleep(500);
   }
-  log("prompt", "wait timeout", { ...details, elapsedMs: Date.now() - startedAt, outputs: outputStates(rootDir, outputs, before) });
-  throw new Error(`timed out waiting for ${outputs.map(path => shown(rootDir, path)).join(", ")}`);
+  log("prompt", "wait timeout", {
+    ...details,
+    elapsedMs: Date.now() - startedAt,
+    outputs: outputStates(rootDir, outputs, before),
+  });
+  throw new Error(
+    `timed out waiting for ${outputs.map((path) => shown(rootDir, path)).join(", ")}`,
+  );
 }
 
 /**
@@ -625,12 +920,27 @@ async function waitForOutputs(rootDir: string, outputs: string[], before: Map<st
 function readDecision(file: string): Decision {
   const data = JSON.parse(readFileSync(file, "utf8")) as Partial<Decision>;
   const outcome = data.outcome;
-  if (outcome !== "accept" && outcome !== "continue" && outcome !== "stop_with_risks") throw new Error(`invalid decision outcome: ${file}`);
-  if (typeof data.reason !== "string") throw new Error(`invalid decision reason: ${file}`);
-  if (typeof data.checksPass !== "boolean") throw new Error(`invalid decision checksPass: ${file}`);
-  if (typeof data.accepts !== "number") throw new Error(`invalid decision accepts: ${file}`);
-  if (typeof data.blocks !== "number") throw new Error(`invalid decision blocks: ${file}`);
-  return { outcome, reason: data.reason, checksPass: data.checksPass, accepts: data.accepts, blocks: data.blocks };
+  if (
+    outcome !== "accept" &&
+    outcome !== "continue" &&
+    outcome !== "stop_with_risks"
+  )
+    throw new Error(`invalid decision outcome: ${file}`);
+  if (typeof data.reason !== "string")
+    throw new Error(`invalid decision reason: ${file}`);
+  if (typeof data.checksPass !== "boolean")
+    throw new Error(`invalid decision checksPass: ${file}`);
+  if (typeof data.accepts !== "number")
+    throw new Error(`invalid decision accepts: ${file}`);
+  if (typeof data.blocks !== "number")
+    throw new Error(`invalid decision blocks: ${file}`);
+  return {
+    outcome,
+    reason: data.reason,
+    checksPass: data.checksPass,
+    accepts: data.accepts,
+    blocks: data.blocks,
+  };
 }
 
 /**
@@ -653,26 +963,37 @@ function readDecision(file: string): Decision {
 async function serve(runDir: string, artifact: string, preferredPort = 5177) {
   const root = resolve(runDir);
   const server = createServer((req, res) => {
-    const path = decodeURIComponent(new URL(req.url || "/", "http://local").pathname);
+    const path = decodeURIComponent(
+      new URL(req.url || "/", "http://local").pathname,
+    );
     const latest = latestIteration(runDir);
     const routes: Record<string, string> = {
       "/": existsSync(join(runDir, artifact)) ? artifact : "report.html",
       "/report.html": "report.html",
       "/report.md": "report.md",
       "/brief.md": "brief.md",
-      "/checks.json": latest ? join("iterations", latest, "checks.json") : "checks.json"
+      "/checks.json": latest
+        ? join("iterations", latest, "checks.json")
+        : "checks.json",
     };
     const routed = routes[path];
     const file = routed ? join(runDir, routed) : resolve(root, `.${path}`);
     // Reject requests that escape the run directory or point to non-files.
-    if (!(file === root || file.startsWith(`${root}/`)) || !existsSync(file) || !statSync(file).isFile()) {
+    if (
+      !(file === root || file.startsWith(`${root}/`)) ||
+      !existsSync(file) ||
+      !statSync(file).isFile()
+    ) {
       res.writeHead(404).end("Not found");
       return;
     }
     res.setHeader("Content-Type", contentType(file));
     res.end(readFileSync(file));
   });
-  const port = await listen(server, preferredPort).catch((e: NodeJS.ErrnoException) => e.code === "EADDRINUSE" ? listen(server, 0) : Promise.reject(e));
+  const port = await listen(server, preferredPort).catch(
+    (e: NodeJS.ErrnoException) =>
+      e.code === "EADDRINUSE" ? listen(server, 0) : Promise.reject(e),
+  );
   log("serve", "listening", { port });
   return { server, port };
 }
@@ -685,7 +1006,9 @@ async function serve(runDir: string, artifact: string, preferredPort = 5177) {
  * @returns Zero-padded folder name (e.g. `"002"`) or `""` if no iterations exist yet.
  */
 function latestIteration(runDir: string) {
-  for (let i = 99; i >= 1; i--) if (existsSync(join(runDir, "iterations", pad(i), "checks.json"))) return pad(i);
+  for (let i = 99; i >= 1; i--)
+    if (existsSync(join(runDir, "iterations", pad(i), "checks.json")))
+      return pad(i);
   return "";
 }
 
@@ -700,7 +1023,10 @@ function latestIteration(runDir: string) {
 function listen(server: Server, port: number) {
   return new Promise<number>((resolveListen, reject) => {
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolveListen((server.address() as { port: number }).port); });
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolveListen((server.address() as { port: number }).port);
+    });
   });
 }
 
@@ -711,8 +1037,14 @@ function listen(server: Server, port: number) {
  * @returns Object with `providerID`, `modelID`, and `variant`.
  */
 function modelSpec() {
-  const [providerID, ...rest] = (process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash").split("/");
-  return { providerID, modelID: rest.join("/"), variant: process.env.SWARM_VARIANT || "max" };
+  const [providerID, ...rest] = (
+    process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash"
+  ).split("/");
+  return {
+    providerID,
+    modelID: rest.join("/"),
+    variant: process.env.SWARM_VARIANT || "max",
+  };
 }
 
 /**
@@ -767,10 +1099,14 @@ function duration(startedAt: number) {
  * @param paths - Absolute paths to the artefact files.
  */
 function artifactSummary(rootDir: string, paths: string[]) {
-  return paths.map(path => {
-    const state = fileState(rootDir, path);
-    return state.exists ? `${outputName(path)}=${formatBytes(state.size)}` : `${outputName(path)}=missing`;
-  }).join(" ");
+  return paths
+    .map((path) => {
+      const state = fileState(rootDir, path);
+      return state.exists
+        ? `${outputName(path)}=${formatBytes(state.size)}`
+        : `${outputName(path)}=missing`;
+    })
+    .join(" ");
 }
 
 /**
@@ -779,7 +1115,13 @@ function artifactSummary(rootDir: string, paths: string[]) {
  * @param states - Output states to format.
  */
 function formatStates(states: OutputState[]) {
-  return states.map(state => state.exists ? `${outputName(state.path)}=${formatBytes(state.size)}` : `${outputName(state.path)}=missing`).join(" ");
+  return states
+    .map((state) =>
+      state.exists
+        ? `${outputName(state.path)}=${formatBytes(state.size)}`
+        : `${outputName(state.path)}=missing`,
+    )
+    .join(" ");
 }
 
 /**
@@ -790,9 +1132,15 @@ function formatStates(states: OutputState[]) {
  * @param startedAt - Epoch ms when the wait loop started.
  */
 function waitSummary(states: OutputState[], startedAt: number) {
-  const done = states.filter(state => state.exists && state.changed).map(state => outputName(state.path));
-  const missing = states.filter(state => !(state.exists && state.changed)).map(state => outputName(state.path));
-  const parts = [`${done.length ? "partial" : "waiting"} ${duration(startedAt)}`];
+  const done = states
+    .filter((state) => state.exists && state.changed)
+    .map((state) => outputName(state.path));
+  const missing = states
+    .filter((state) => !(state.exists && state.changed))
+    .map((state) => outputName(state.path));
+  const parts = [
+    `${done.length ? "partial" : "waiting"} ${duration(startedAt)}`,
+  ];
   if (done.length) parts.push(`done=${done.join(",")}`);
   if (missing.length) parts.push(`missing=${missing.join(",")}`);
   return parts.join(" ");
@@ -836,7 +1184,9 @@ function shortID(id: string) {
  */
 function quote(text: string) {
   const clean = text.replace(/\s+/g, " ").trim();
-  return JSON.stringify(clean.length > 160 ? `${clean.slice(0, 157)}...` : clean);
+  return JSON.stringify(
+    clean.length > 160 ? `${clean.slice(0, 157)}...` : clean,
+  );
 }
 
 /**
@@ -846,7 +1196,11 @@ function quote(text: string) {
  * @param data - Value to serialize.
  */
 function serialize(data: unknown) {
-  try { return JSON.stringify(data); } catch (error) { return JSON.stringify({ unserializable: describe(error) }); }
+  try {
+    return JSON.stringify(data);
+  } catch (error) {
+    return JSON.stringify({ unserializable: describe(error) });
+  }
 }
 
 /**
@@ -859,11 +1213,21 @@ function serialize(data: unknown) {
  * @param data - Raw value returned by the opencode SDK.
  */
 function summarizeData(data: unknown) {
-  if (data === null || data === undefined || typeof data !== "object") return data;
+  if (data === null || data === undefined || typeof data !== "object")
+    return data;
   if (Array.isArray(data)) return { type: "array", length: data.length };
   const obj = data as Record<string, unknown>;
-  const summary: Record<string, unknown> = { keys: Object.keys(obj).slice(0, 20) };
-  for (const key of ["id", "sessionID", "messageID", "role", "type", "status"]) {
+  const summary: Record<string, unknown> = {
+    keys: Object.keys(obj).slice(0, 20),
+  };
+  for (const key of [
+    "id",
+    "sessionID",
+    "messageID",
+    "role",
+    "type",
+    "status",
+  ]) {
     if (key in obj) summary[key] = obj[key];
   }
   if ("time" in obj) summary.time = obj.time;
@@ -896,7 +1260,7 @@ function pad(n: number) {
  * @param ms - Duration to sleep in milliseconds.
  */
 function sleep(ms: number) {
-  return new Promise(resolveSleep => setTimeout(resolveSleep, ms));
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
 /**
@@ -906,18 +1270,22 @@ function sleep(ms: number) {
  * @param file - Absolute or relative file path; only the extension is examined.
  */
 function contentType(file: string) {
-  return ({
-    ".html": "text/html; charset=utf-8",
-    ".md": "text/markdown; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".svg": "image/svg+xml",
-    ".css": "text/css; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8"
-  } as Record<string, string>)[extname(file).toLowerCase()] || "application/octet-stream";
+  return (
+    (
+      {
+        ".html": "text/html; charset=utf-8",
+        ".md": "text/markdown; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+      } as Record<string, string>
+    )[extname(file).toLowerCase()] || "application/octet-stream"
+  );
 }
 
 /**
@@ -931,14 +1299,22 @@ function contentType(file: string) {
  */
 function describe(error: unknown): string {
   if (error instanceof Error) {
-    return error.cause === undefined ? error.message : `${error.message}; cause: ${describe(error.cause)}`;
+    return error.cause === undefined
+      ? error.message
+      : `${error.message}; cause: ${describe(error.cause)}`;
   }
   if (typeof error === "object" && error !== null) {
     const obj = error as Record<string, unknown>;
     const code = typeof obj.code === "string" ? ` code=${obj.code}` : "";
-    const message = typeof obj.message === "string" ? ` message=${obj.message}` : "";
-    const cause = obj.cause === undefined ? "" : ` cause=${describe(obj.cause)}`;
+    const message =
+      typeof obj.message === "string" ? ` message=${obj.message}` : "";
+    const cause =
+      obj.cause === undefined ? "" : ` cause=${describe(obj.cause)}`;
     if (code || message || cause) return `${code}${message}${cause}`.trim();
   }
-  try { return JSON.stringify(error); } catch { return String(error); }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }

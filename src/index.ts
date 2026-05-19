@@ -12,7 +12,7 @@ if (!input) {
   process.exit(1);
 }
 
-runSwarm(accessibilityProfile, input, rootDir).catch(e => {
+runSwarm(accessibilityProfile, input, rootDir).catch((e) => {
   console.error(`[swarm] fatal: ${e instanceof Error ? e.message : String(e)}`);
   process.exit(1);
 });
