@@ -23,16 +23,16 @@ import { basename, dirname, extname, join, relative, resolve } from "node:path";
 export type Reviewer = {
   /** Stable machine identifier used as a session key and filename prefix (e.g. `"a11y"`). */
   id: string;
-  /** Human-readable reviewer name used by prompt templates. */
+  /** Human-readable label passed into reviewer prompt templates (e.g. `"Accessibility Reviewer"`). */
   name: string;
 };
 
 /**
- * Decision record for an iteration, written to `decision.json`.
+ * The orchestrator's verdict at the end of each iteration, written to `decision.json`.
  *
- * - `"accept"` — finish the run.
- * - `"continue"` — run another iteration.
- * - `"stop_with_risks"` — stop now and report remaining risks.
+ * - `"accept"` — the orchestrator judged the artifact ready to ship.
+ * - `"continue"` — issues remain; the loop should run another iteration.
+ * - `"stop_with_risks"` — stop the loop and report the known risks in `reason`.
  */
 export type Decision = {
   /** Final outcome of the iteration review. */
@@ -181,7 +181,7 @@ export type SwarmProfile = {
   /**
    * Returns the prompt that instructs the orchestrator to produce `report.md`
    * and `report.html` summarizing the entire run.
-   * @param decision - Final decision from the last completed iteration.
+   * @param decision - Final decision from the last completed iteration, if one exists.
    */
   reportPrompt(ctx: RunContext, decision?: Decision): string;
 };
@@ -197,7 +197,7 @@ type Harness = {
   /** Base URL of the opencode server (either external or locally spawned). */
   url: string;
   /**
-   * If present, calling this closes the locally spawned opencode server.
+   * If present, calling this closes the locally-spawned opencode server.
    * Absent when the harness was attached to a pre-existing external server,
    * in which case the server is left running after the swarm finishes.
    */
@@ -207,7 +207,8 @@ type Harness = {
 };
 
 /**
- * Snapshot of an expected output file before or after a prompt runs.
+ * Snapshot of a single expected output file, used to detect whether the file
+ * changed after a prompt was submitted.
  */
 type OutputState = {
   /** Display path (relative to `rootDir`). */
@@ -216,7 +217,7 @@ type OutputState = {
   exists: boolean;
   /**
    * `true` if the file exists and its `mtimeMs` is strictly greater than
-   * `previousMtimeMs`.
+   * `previousMtimeMs`, indicating the output changed after the prompt.
    */
   changed: boolean;
   /** Modification timestamp captured before the prompt was submitted. */
@@ -265,11 +266,11 @@ let started = Date.now();
  * @param input - URL or identifier passed to `profile.scan()` (e.g. a webpage URL).
  * @param rootDir - Absolute path to the project root; all run artifacts are written beneath it.
  *
- * @returns Resolves after the report is written and the preview server is listening.
- *   The preview server stays open after this function returns.
+ * @returns Resolves when the run completes (report written, server listening). Does NOT await
+ *   the HTTP server to close — the process must stay alive for the preview to remain accessible.
  *
  * @throws If `profile.scan()` throws, or if any agent prompt times out, or if the opencode
- *   server fails to start. A locally spawned opencode server is closed in `finally`.
+ *   server fails to start. The `finally` block closes a locally-spawned opencode server.
  *
  * @example
  * ```typescript
@@ -483,7 +484,8 @@ export async function runSwarm(
       );
       lastDecision = readDecision(decisionFile);
 
-      // Make the final decision terminal before writing the report.
+      // Cap a lingering "continue" at the last iteration so decision.json
+      // and the final report always get a terminal outcome.
       if (lastDecision.outcome === "continue" && iteration === maxIterations) {
         lastDecision = {
           ...lastDecision,
@@ -683,11 +685,16 @@ async function sessionFor(
 }
 
 /**
- * Sends a prompt and waits for the expected output files to appear or change.
+ * Submits a prompt to an agent session and blocks until all expected output
+ * files exist and have changed on disk.
  *
- * The prompt text is saved to `promptFile` before submission. Output detection
- * is file-system based: each output must exist and have a newer `mtimeMs` than
- * it had before the prompt was submitted.
+ * The prompt text is persisted to `promptFile` before submission so that the
+ * exact instruction sent to each agent is reproducible from the run directory.
+ * Output detection is file-system based: the function polls for each path in
+ * `outputs` and considers it done when the file exists with a newer `mtimeMs`
+ * than before the prompt was submitted. In normal runs, that means the agent
+ * wrote the file; the code deliberately checks the file state instead of trying
+ * to prove which process wrote it.
  *
  * @param active - Live harness with the SDK client.
  * @param rootDir - Project root for display paths and session directory.
@@ -695,9 +702,9 @@ async function sessionFor(
  * @param phase - Display label used in progress output (e.g. `"findings"`, `"fix"`).
  * @param runDir - Current run directory.
  * @param promptFile - Absolute path where the prompt markdown will be saved.
- * @param outputs - Absolute paths that must exist and be newer before this resolves.
+ * @param outputs - Absolute paths of files expected to exist and change before this resolves.
  * @param text - The full prompt text to send.
- * @throws If the SDK rejects the prompt or outputs are not ready before `SWARM_AGENT_TIMEOUT_MS`.
+ * @throws If the SDK rejects the prompt or if outputs are not ready before `SWARM_AGENT_TIMEOUT_MS`.
  */
 async function promptAgent(
   active: Harness,
@@ -842,17 +849,18 @@ function fileState(rootDir: string, path: string) {
 }
 
 /**
- * Polls until every output exists and has a newer `mtimeMs` than its baseline.
+ * Polls the filesystem until all `outputs` exist and have been modified since
+ * the `before` baseline, or until the configured timeout elapses.
  *
- * Uses a 500 ms sleep between polls. Logs progress at
- * `SWARM_WAIT_LOG_INTERVAL_MS` intervals (default 10 s).
+ * Uses a 500 ms sleep between polls to avoid hot-spinning while outputs are being written.
+ * Logs progress at `SWARM_WAIT_LOG_INTERVAL_MS` intervals (default 10 s).
  *
  * @param rootDir - Project root for display paths.
- * @param outputs - Absolute paths to wait for.
+ * @param outputs - Absolute paths that must exist and have newer mtimes.
  * @param before - Pre-prompt mtime baseline from {@link outputTimes}.
  * @param details - Context included in every log line (key, phase, sessionID).
- * @returns Resolves with final output states once every output is ready.
- * @throws `Error` if `SWARM_AGENT_TIMEOUT_MS` elapses first.
+ * @returns Resolves with the final {@link OutputState} array once all outputs are ready.
+ * @throws `Error` if `SWARM_AGENT_TIMEOUT_MS` elapses before all outputs are ready.
  */
 async function waitForOutputs(
   rootDir: string,
@@ -991,10 +999,11 @@ async function serve(runDir: string, artifact: string, preferredPort = 5177) {
 }
 
 /**
- * Finds the latest `checks.json` among iterations `001` through `099`.
+ * Scans iteration folders `099` down to `001` and returns the newest one that
+ * contains `checks.json`.
  *
  * @param runDir - Current run directory.
- * @returns Zero-padded folder name (e.g. `"002"`) or `""` if none is found.
+ * @returns Zero-padded folder name (e.g. `"002"`) or `""` if no checks file is found.
  */
 function latestIteration(runDir: string) {
   for (let i = 99; i >= 1; i--)
@@ -1181,8 +1190,8 @@ function quote(text: string) {
 }
 
 /**
- * Safe JSON serializer that falls back gracefully for circular or otherwise
- * non-serializable values.
+ * Calls `JSON.stringify` for log data. If serialization throws, such as for
+ * circular objects or BigInts, returns a small JSON object with the error detail.
  *
  * @param data - Value to serialize.
  */
@@ -1195,10 +1204,11 @@ function serialize(data: unknown) {
 }
 
 /**
- * Reduces an SDK response to a small summary for log lines.
+ * Reduces an arbitrary response object to a small summary suitable for log lines,
+ * avoiding the cost of serializing large agent payloads in full.
  *
- * Arrays are summarized by length. Objects keep their first keys and selected
- * scalar fields such as `id`, `sessionID`, `role`, and `status`.
+ * Arrays are summarized by length. Objects keep their first keys plus selected
+ * scalar fields (`id`, `sessionID`, `role`, etc.), discarding the rest.
  *
  * @param data - Raw value returned by the opencode SDK.
  */
@@ -1279,11 +1289,12 @@ function contentType(file: string) {
 }
 
 /**
- * Converts most thrown values to readable text for log lines.
+ * Converts thrown values to readable text for log lines.
  *
- * Handles `Error` instances (including chained `.cause`), plain objects with
- * `code`/`message`/`cause` fields (common in Node.js SDK errors), and falls
- * back to `JSON.stringify` when possible.
+ * Handles `Error` instances (including chained `.cause`) and plain objects with
+ * `code`/`message`/`cause` fields, which are common in Node.js SDK errors.
+ * For other values, it returns `JSON.stringify(error)`; some JavaScript values,
+ * such as `undefined`, stringify to `undefined`.
  *
  * @param error - The caught value (may be any type).
  */
