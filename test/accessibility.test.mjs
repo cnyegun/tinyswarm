@@ -12,6 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 const transparentGif =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+const axeTargetLimit = 240;
 
 test("dist accessibility build is fresh", async () => {
   const distAccessibility = join(repoRoot, "dist", "accessibility.js");
@@ -54,7 +55,8 @@ test("accessibility scan writes compact axe and full axe sidecar", async () => {
   ).join("");
   const images = Array.from(
     { length: 90 },
-    (_, index) => `<img data-long="${longAttr}-${index}" src="${transparentGif}">`,
+    (_, index) =>
+      `<img id="missing-alt-${index}-${longAttr}" data-long="${longAttr}-${index}" src="${transparentGif}">`,
   ).join("");
   const page = `<!doctype html><html lang="en"><head><title>Scan compact</title></head><body><main><h1>Scan compact</h1>${headings}${links}${buttons}${paragraphs}${images}</main></body></html>`;
   const server = await listen((_, res) => {
@@ -96,7 +98,8 @@ test("accessibility check keeps axe violations compact but actionable", async ()
   const longAttr = "y".repeat(2000);
   const images = Array.from(
     { length: 90 },
-    (_, index) => `<img data-long="${longAttr}-${index}" src="${transparentGif}">`,
+    (_, index) =>
+      `<img id="missing-alt-${index}-${longAttr}" data-long="${longAttr}-${index}" src="${transparentGif}">`,
   ).join("");
   const html = `<!doctype html><html lang="en"><head><title>Compact check</title></head><body><main><h1>Compact check</h1>${images}</main></body></html>`;
   await writeFile(
@@ -109,7 +112,7 @@ test("accessibility check keeps axe violations compact but actionable", async ()
 
   assertCompactViolationShape(violation, 90);
   assert.ok(violation.additionalTargets.length > 0);
-  assert.ok(violation.nodes[0].target[0].startsWith("img"));
+  assert.equal(typeof violation.nodes[0].target[0], "string");
   assert.match(violation.nodes[0].failureSummary, /alt attribute/);
   assert.ok(JSON.stringify(result).length < 30000);
 
@@ -183,8 +186,12 @@ function assertCompactViolationShape(violation, nodeCount) {
   assert.ok(violation.nodes.length <= 5);
   assert.equal(violation.omittedNodes, nodeCount - violation.nodes.length);
   assert.ok((violation.additionalTargets || []).length <= 25);
+  for (const target of violation.additionalTargets || []) {
+    assertCompactTarget(target);
+  }
 
   for (const node of violation.nodes) {
+    assertCompactTarget(node.target);
     assert.ok(node.html.length <= 500);
     assert.ok(node.failureSummary.length <= 1200);
     assert.ok((node.checks || []).length <= 8);
@@ -192,6 +199,17 @@ function assertCompactViolationShape(violation, nodeCount) {
       assert.ok(check.message.length <= 300);
     }
   }
+}
+
+function assertCompactTarget(target) {
+  if (Array.isArray(target)) {
+    assert.ok(target.length > 0);
+    for (const item of target) assertCompactTarget(item);
+    return;
+  }
+  assert.equal(typeof target, "string");
+  assert.ok(target.length > 0);
+  assert.ok(target.length <= axeTargetLimit);
 }
 
 function listen(handler) {

@@ -55,6 +55,7 @@ type AxeViolationInput = {
 
 const AXE_NODE_SAMPLE_LIMIT = 5;
 const AXE_ADDITIONAL_TARGET_LIMIT = 25;
+const AXE_TARGET_LIMIT = 240;
 const AXE_HTML_LIMIT = 500;
 const AXE_FAILURE_SUMMARY_LIMIT = 1200;
 const AXE_CHECK_MESSAGE_LIMIT = 300;
@@ -625,8 +626,16 @@ function compactCheckGroup(type: string, checks?: AxeCheckInput[]) {
 }
 
 function compactTarget(target: unknown): unknown[] {
-  if (Array.isArray(target)) return target.filter(Boolean);
-  return typeof target === "string" && target ? [target] : [];
+  if (Array.isArray(target)) return target.map(compactTargetItem).filter(Boolean);
+  const item = compactTargetItem(target);
+  return item === undefined ? [] : [item];
+}
+
+function compactTargetItem(item: unknown): unknown | undefined {
+  if (typeof item === "string") return compactString(item, AXE_TARGET_LIMIT);
+  if (!Array.isArray(item)) return undefined;
+  const nested = item.map(compactTargetItem).filter(Boolean);
+  return nested.length ? nested : undefined;
 }
 
 function compactStringArray(value: unknown): string[] | undefined {
