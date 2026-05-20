@@ -300,15 +300,7 @@ export async function runSwarm(
     await runScan(run);
 
     const active = await ensureHarness(run);
-    await promptAgent(
-      active,
-      run,
-      "orchestrator",
-      "brief",
-      join(runDir, "prompts", "brief.md"),
-      [join(runDir, "brief.md")],
-      profile.briefPrompt(ctx),
-    );
+    await writeBrief(run, active);
 
     let lastDecision: Decision | undefined;
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -565,6 +557,19 @@ async function runScan(run: RunState) {
     });
     throw error;
   }
+}
+
+/** Writes the shared brief that every later agent phase reads. */
+async function writeBrief(run: RunState, active: AgentHarness) {
+  await promptAgent(
+    active,
+    run,
+    "orchestrator",
+    "brief",
+    join(run.runDir, "prompts", "brief.md"),
+    [join(run.runDir, "brief.md")],
+    run.profile.briefPrompt(run),
+  );
 }
 
 /**
