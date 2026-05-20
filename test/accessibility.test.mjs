@@ -121,6 +121,26 @@ test("accessibility check keeps axe violations compact but actionable", async ()
   assert.ok(JSON.stringify(result).length < JSON.stringify(full).length / 3);
 });
 
+test("accessibility check serves modern asset MIME types", async () => {
+  const runDir = await mkdtemp(join(tmpdir(), "tiny-rewrite-a11y-assets-"));
+  await mkdir(join(runDir, "screenshots"), { recursive: true });
+  await writeFile(join(runDir, "facts.json"), JSON.stringify({ url: "" }));
+  await writeFile(join(runDir, "sample.webp"), "webp");
+  await writeFile(join(runDir, "sample.woff2"), "woff2");
+  await writeFile(
+    join(runDir, "transformed.html"),
+    `<!doctype html><html lang="en"><head><title>pending</title><script>
+      Promise.all(["/sample.webp", "/sample.woff2"].map((path) =>
+        fetch(path).then((response) => response.headers.get("content-type"))
+      )).then((types) => { document.title = types.join("|"); });
+    </script></head><body><main><h1>Asset MIME</h1></main></body></html>`,
+  );
+
+  const result = await accessibilityProfile.check({ rootDir: runDir, runDir }, 1);
+
+  assert.equal(result.title, "image/webp|font/woff2");
+});
+
 test("accessibility prompts keep sidecars targeted and prior iteration exact", () => {
   const runDir = "/tmp/tiny-rewrite-run";
   const iterDir = join(runDir, "iterations", "002");
