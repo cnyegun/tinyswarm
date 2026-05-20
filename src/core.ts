@@ -297,39 +297,7 @@ export async function runSwarm(
 
   try {
     const ctx: RunPaths = run;
-    const scanStarted = Date.now();
-    log(run, "scan", "starting", { profile: profile.id, input });
-    progress("scan", `start url=${input}`);
-    try {
-      await profile.scan(input, ctx);
-      progress(
-        "scan",
-        `done ${duration(scanStarted)} ${artifactSummary(
-          rootDir,
-          [
-            "original.html",
-            "facts.json",
-            "axe.json",
-            join("screenshots", "original.png"),
-          ].map((path) => join(runDir, path)),
-        )}`,
-      );
-      log(run, "scan", "done", {
-        elapsedMs: Date.now() - scanStarted,
-        artifacts: [
-          "original.html",
-          "facts.json",
-          "axe.json",
-          join("screenshots", "original.png"),
-        ].map((path) => fileState(rootDir, join(runDir, path))),
-      });
-    } catch (error) {
-      log(run, "scan", "failed", {
-        elapsedMs: Date.now() - scanStarted,
-        error: describe(error),
-      });
-      throw error;
-    }
+    await runScan(run);
 
     const active = await ensureHarness(run);
     await promptAgent(
@@ -558,6 +526,45 @@ function prepareRun(
   });
 
   return run;
+}
+
+/**
+ * Runs the profile-owned scan phase and records the artifacts operators expect
+ * to inspect before any agent sessions are opened.
+ */
+async function runScan(run: RunState) {
+  const { profile, input, rootDir, runDir } = run;
+  const scanStarted = Date.now();
+  log(run, "scan", "starting", { profile: profile.id, input });
+  progress("scan", `start url=${input}`);
+  try {
+    await profile.scan(input, run);
+    const scanArtifacts = [
+      "original.html",
+      "facts.json",
+      "axe.json",
+      join("screenshots", "original.png"),
+    ];
+    progress(
+      "scan",
+      `done ${duration(scanStarted)} ${artifactSummary(
+        rootDir,
+        scanArtifacts.map((path) => join(runDir, path)),
+      )}`,
+    );
+    log(run, "scan", "done", {
+      elapsedMs: Date.now() - scanStarted,
+      artifacts: scanArtifacts.map((path) =>
+        fileState(rootDir, join(runDir, path)),
+      ),
+    });
+  } catch (error) {
+    log(run, "scan", "failed", {
+      elapsedMs: Date.now() - scanStarted,
+      error: describe(error),
+    });
+    throw error;
+  }
 }
 
 /**
