@@ -61,6 +61,14 @@ const AXE_FAILURE_SUMMARY_LIMIT = 1200;
 const AXE_CHECK_MESSAGE_LIMIT = 300;
 const AXE_NODE_CHECK_LIMIT = 8;
 
+const COLLAPSE_WHITESPACE = /\s+/g;
+// Snapshot HTML is static, so these patterns only rewrite plain href/src/srcset
+// attributes and root-relative CSS url(...) references. Anything more dynamic is
+// left unchanged instead of pretending to be a full HTML/CSS parser.
+const HTML_URL_ATTRIBUTE = /(\s(?:href|src)=)(["'])([^"']*)\2/gi;
+const HTML_SRCSET_ATTRIBUTE = /(\ssrcset=)(["'])([^"']*)\2/gi;
+const ROOT_RELATIVE_CSS_URL = /url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi;
+
 const reviewers = [
   { id: "semantic", name: "screen-reader/semantic structure reviewer" },
   { id: "keyboard", name: "keyboard and motor access reviewer" },
@@ -89,6 +97,8 @@ function fileList(paths: string[]) {
   return paths.map((path) => `- ${path}`).join("\n");
 }
 
+// Findings happen before the current iteration's check step, so the newest
+// check evidence available during iteration N is from iteration N-1.
 function previousIterationDir(runDir: string, iteration: number) {
   return join(runDir, "iterations", String(iteration - 1).padStart(3, "0"));
 }
@@ -420,7 +430,9 @@ async function scan(url: string, { runDir }: { runDir: string }) {
 
 async function extractFacts(page: Page): Promise<Facts> {
   return page.evaluate(() => {
-    const clean = (s?: string | null) => (s || "").replace(/\s+/g, " ").trim();
+    const collapseWhitespace = /\s+/g;
+    const clean = (s?: string | null) =>
+      (s || "").replace(collapseWhitespace, " ").trim();
     const visible = (e: Element) => {
       const h = e as HTMLElement;
       const r = h.getBoundingClientRect();
@@ -548,16 +560,21 @@ async function check(
   return result;
 }
 
+// Agent prompts read compact axe artifacts by default. Raw axe output is kept in
+// sidecar files, so the compact form keeps rule metadata, a small node sample,
+// and extra locators without flooding the context window.
 function compactAxeViolations(violations: AxeViolationInput[]) {
   return violations.map((violation) => {
     const nodes = violation.nodes || [];
     const sampledNodes = nodes.slice(0, AXE_NODE_SAMPLE_LIMIT);
     const sampledTargets = new Set(
-      sampledNodes.map((node) => JSON.stringify(compactTarget(node.target))),
+      sampledNodes.map((node) => JSON.stringify(truncateAxeTarget(node.target))),
     );
     const additionalTargets: unknown[][] = [];
+    // Omitted nodes still need locators for repeated failures, but not their full
+    // HTML/check payloads. De-duping keeps repeated selectors from dominating.
     for (const node of nodes.slice(AXE_NODE_SAMPLE_LIMIT)) {
-      const target = compactTarget(node.target);
+      const target = truncateAxeTarget(node.target);
       if (!target.length) continue;
       const key = JSON.stringify(target);
       if (sampledTargets.has(key)) continue;
@@ -566,13 +583,13 @@ function compactAxeViolations(violations: AxeViolationInput[]) {
       if (additionalTargets.length >= AXE_ADDITIONAL_TARGET_LIMIT) break;
     }
 
-    return withoutUndefined({
+    return omitUndefinedFields({
       id: violation.id,
       impact: violation.impact || undefined,
       help: violation.help,
       helpUrl: violation.helpUrl,
       description: violation.description,
-      tags: compactStringArray(violation.tags),
+      tags: stringArray(violation.tags),
       nodeCount: nodes.length,
       nodes: sampledNodes.map(compactAxeNode),
       additionalTargets: additionalTargets.length ? additionalTargets : undefined,
@@ -593,12 +610,12 @@ function compactAxeResult<T extends {
 }
 
 function compactAxeNode(node: AxeNodeInput) {
-  const checks = compactAxeNodeChecks(node);
-  return withoutUndefined({
-    target: compactTarget(node.target),
+  const checks = compactChecksForNode(node);
+  return omitUndefinedFields({
+    target: truncateAxeTarget(node.target),
     impact: node.impact || undefined,
-    html: compactString(node.html, AXE_HTML_LIMIT),
-    failureSummary: compactString(
+    html: truncateEvidenceText(node.html, AXE_HTML_LIMIT),
+    failureSummary: truncateEvidenceText(
       node.failureSummary,
       AXE_FAILURE_SUMMARY_LIMIT,
     ),
@@ -606,53 +623,57 @@ function compactAxeNode(node: AxeNodeInput) {
   });
 }
 
-function compactAxeNodeChecks(node: AxeNodeInput) {
+function compactChecksForNode(node: AxeNodeInput) {
   return [
-    ...compactCheckGroup("any", node.any),
-    ...compactCheckGroup("all", node.all),
-    ...compactCheckGroup("none", node.none),
+    ...compactCheckMessages("any", node.any),
+    ...compactCheckMessages("all", node.all),
+    ...compactCheckMessages("none", node.none),
   ].slice(0, AXE_NODE_CHECK_LIMIT);
 }
 
-function compactCheckGroup(type: string, checks?: AxeCheckInput[]) {
+function compactCheckMessages(type: string, checks?: AxeCheckInput[]) {
   return (checks || []).map((check) =>
-    withoutUndefined({
+    omitUndefinedFields({
       type,
       id: check.id,
       impact: check.impact || undefined,
-      message: compactString(check.message, AXE_CHECK_MESSAGE_LIMIT),
+      message: truncateEvidenceText(check.message, AXE_CHECK_MESSAGE_LIMIT),
     }),
   );
 }
 
-function compactTarget(target: unknown): unknown[] {
-  if (Array.isArray(target)) return target.map(compactTargetItem).filter(Boolean);
-  const item = compactTargetItem(target);
+// Axe targets are selectors, or nested selector arrays for frames/shadow DOM.
+// Preserve that shape, but cap each selector string independently.
+function truncateAxeTarget(target: unknown): unknown[] {
+  if (Array.isArray(target))
+    return target.map(truncateAxeTargetItem).filter(Boolean);
+  const item = truncateAxeTargetItem(target);
   return item === undefined ? [] : [item];
 }
 
-function compactTargetItem(item: unknown): unknown | undefined {
-  if (typeof item === "string") return compactString(item, AXE_TARGET_LIMIT);
+function truncateAxeTargetItem(item: unknown): unknown | undefined {
+  if (typeof item === "string")
+    return truncateEvidenceText(item, AXE_TARGET_LIMIT);
   if (!Array.isArray(item)) return undefined;
-  const nested = item.map(compactTargetItem).filter(Boolean);
+  const nested = item.map(truncateAxeTargetItem).filter(Boolean);
   return nested.length ? nested : undefined;
 }
 
-function compactStringArray(value: unknown): string[] | undefined {
+function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const strings = value.filter((item): item is string => typeof item === "string");
   return strings.length ? strings : undefined;
 }
 
-function compactString(value: unknown, limit: number): string | undefined {
+function truncateEvidenceText(value: unknown, limit: number): string | undefined {
   if (typeof value !== "string") return undefined;
-  const clean = value.replace(/\s+/g, " ").trim();
+  const clean = value.replace(COLLAPSE_WHITESPACE, " ").trim();
   if (!clean) return undefined;
   if (clean.length <= limit) return clean;
   return `${clean.slice(0, Math.max(0, limit - 3))}...`;
 }
 
-function withoutUndefined<T extends Record<string, unknown>>(value: T) {
+function omitUndefinedFields<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined),
   );
@@ -682,20 +703,22 @@ function originalUrl(runDir: string) {
   }
 }
 
+// Saved snapshots are later served from the run directory. Root-relative asset
+// paths must keep resolving against the original page URL, not localhost.
 function absolutizeHtmlResources(html: string, baseUrl: string) {
   return html
     .replace(
-      /(\s(?:href|src)=)(["'])([^"']*)\2/gi,
+      HTML_URL_ATTRIBUTE,
       (_match, prefix: string, quote: string, value: string) =>
         `${prefix}${quote}${absolutizeUrl(value, baseUrl)}${quote}`,
     )
     .replace(
-      /(\ssrcset=)(["'])([^"']*)\2/gi,
+      HTML_SRCSET_ATTRIBUTE,
       (_match, prefix: string, quote: string, value: string) =>
         `${prefix}${quote}${absolutizeSrcset(value, baseUrl)}${quote}`,
     )
     .replace(
-      /url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi,
+      ROOT_RELATIVE_CSS_URL,
       (_match, quote: string, value: string) =>
         `url(${quote}${absolutizeUrl(value, baseUrl)}${quote})`,
     );
@@ -706,7 +729,7 @@ function absolutizeSrcset(value: string, baseUrl: string) {
     .split(",")
     .map((candidate) => {
       const trimmed = candidate.trim();
-      const [url, ...descriptor] = trimmed.split(/\s+/);
+      const [url, ...descriptor] = trimmed.split(COLLAPSE_WHITESPACE);
       return [absolutizeUrl(url, baseUrl), ...descriptor].join(" ");
     })
     .join(", ");
