@@ -123,6 +123,8 @@ test("runSwarm keeps prompt payloads path-only when artifacts are large", async 
 
   assert.equal(result.error, undefined);
   assert.equal(result.promptCount, 11);
+  // The mock profile lists full sidecar paths in prompts. This proves paths are
+  // allowed while raw file contents stay out of the opencode payload.
   assert.equal(
     result.promptRequests.some(({ text }) => text.includes("axe-full.json")),
     true,
@@ -133,6 +135,8 @@ test("runSwarm keeps prompt payloads path-only when artifacts are large", async 
   );
 
   for (const { phase, text } of result.promptRequests) {
+    // A small ceiling catches accidental prompt-content injection early. The
+    // sentinel checks below identify exactly which raw artifact leaked.
     assert.ok(text.length < 2500, `${phase} prompt too large: ${text.length}`);
     for (const sentinel of rawArtifactSentinels) {
       assert.equal(

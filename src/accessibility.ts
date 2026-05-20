@@ -53,6 +53,9 @@ type AxeViolationInput = {
   nodes?: AxeNodeInput[];
 };
 
+// These caps define the contract for agent-facing axe evidence. The full axe
+// output is still written to sidecar files, so these limits only protect prompt
+// context from repeated node payloads and giant selectors.
 const AXE_NODE_SAMPLE_LIMIT = 5;
 const AXE_ADDITIONAL_TARGET_LIMIT = 25;
 const AXE_TARGET_LIMIT = 240;
@@ -90,6 +93,9 @@ const roleCriteria: Record<string, string> = {
 const TARGETED_EVIDENCE =
   "Inspect only the files and snippets needed for this phase. Use targeted reads/searches; do not load raw HTML, full axe nodes, or long artifacts wholesale. Open full sidecars only after a compact finding/violation id or target needs missing detail.";
 
+// Every agent writes a follow-up artifact that later prompts may reference.
+// Keeping this shared instruction explicit prevents evidence from being copied
+// from file to file until the context window fills with duplicates.
 const COMPACT_OUTPUT =
   "Keep outputs compact and deduplicated. Reference finding ids, axe ids, and short element labels; keep evidence snippets brief and do not paste raw HTML, full axe nodes, or long repeated file excerpts.";
 
@@ -109,6 +115,9 @@ export const accessibilityProfile: SwarmProfile = {
   reviewers,
   scan,
   check,
+  // The brief is the only phase that turns raw scan output into a shared mental
+  // model. It should summarize source purpose/preservation once so reviewers do
+  // not each rediscover the same facts from raw HTML.
   briefPrompt: ({
     runDir,
   }) => `You are the swarm orchestrator for an accessibility remediation run. Use the available source page evidence to write a practical, preservation-focused accessibility brief for specialist reviewers and the fixer.
@@ -139,6 +148,9 @@ Write brief.md with these sections:
 ${COMPACT_OUTPUT}
 
 Be evidence-based. If something is uncertain, mark it as uncertain rather than turning it into a requirement. Write only files inside the run directory.`,
+  // Findings are per-reviewer and intentionally narrow. Later iterations reuse
+  // the same reviewer session, so the prompt points at only the latest changed
+  // files instead of making each reviewer re-read the whole source page.
   findingsPrompt: (
     { runDir, iterDir, iteration },
     reviewer,
@@ -186,6 +198,9 @@ If no issue is proven, use an empty findings array and risk low. Do not edit tra
 
 Write exactly this JSON shape:
 { "role": "${reviewer.id}", "findings": ["id=${reviewer.id}-1 | category=... | severity=... | confidence=... | location=... | evidence=... | issue=... | suggestedFix=..."], "risk": "low" | "medium" | "high" }`,
+  // The aggregate phase is where noisy parallel reviewer output gets converted
+  // into a small work order. The caps below are prompt-level guardrails: they do
+  // not hide data, because agents can still inspect targeted artifacts.
   aggregatePrompt: ({
     runDir,
     iterDir,
@@ -235,6 +250,9 @@ solver-task.md should tell the fixer exactly what to change and what not to chan
 ${COMPACT_OUTPUT}
 
 Write only these files.`,
+  // The fixer is the only role allowed to use original.html as a full starting
+  // point. Reviewer/orchestrator phases should cite snippets, while the fixer may
+  // need the whole page once to produce a faithful standalone HTML output.
   fixPrompt: ({
     runDir,
     iterDir,
@@ -292,6 +310,9 @@ Implementation guidance:
 
 solver-result.json must be valid JSON. Keep at least this compatible shape and add simple fields if helpful:
 { "changed": true, "summary": "string", "accessibilityFixes": ["string"], "preservationNotes": ["string"], "removedContent": ["string"], "residualRisks": ["string"] }`,
+  // Votes run after automated checks. They should use checks.json as the compact
+  // source of truth, and only open checks-full.json if a specific compact node is
+  // too ambiguous to judge.
   votePrompt: (
     { runDir, iterDir },
     reviewer,
@@ -328,6 +349,8 @@ Score 0-100. Suggested scale: 90-100 accept with minor residual risk; 70-89 revi
 
 Write exactly this tiny JSON shape:
 { "vote": "accept" | "revise" | "block", "score": number, "reason": "short reason" }`,
+  // The decision phase is deliberately conservative: automated pass is required,
+  // but preservation regressions or human-review blocks still force another loop.
   decisionPrompt: ({
     runDir,
     iterDir,
@@ -358,6 +381,8 @@ Decision rules:
 - If the transformed page appears worse than original or destructive, prefer continue unless retry limits or repeated failures make stop_with_risks more honest.
 
 The reason should mention the decisive evidence: automated pass/fail, accept/block counts, major unresolved accessibility items, and preservation status.`,
+  // Reports should be audit-friendly, not marketing copy. They summarize compact
+  // artifacts from the completed run and avoid claiming full WCAG conformance.
   reportPrompt: (
     { runDir },
     decision?: Decision,
@@ -394,6 +419,9 @@ async function scan(url: string, { runDir }: { runDir: string }) {
   mkdirSync(join(runDir, "screenshots"), { recursive: true });
   const browser = await chromium.launch();
   try {
+    // Scan captures a stable snapshot of the original page before any agent can
+    // edit it. Later phases compare against these files to catch destructive
+    // rewrites that pass axe but lose real page content.
     const context = await browser.newContext({
       viewport: { width: 1365, height: 900 },
     });
@@ -413,12 +441,17 @@ async function scan(url: string, { runDir }: { runDir: string }) {
       absolutizeHtmlResources(await page.content(), page.url()),
     );
     writeFileSync(join(runDir, "facts.json"), JSON.stringify(facts, null, 2));
+    // Axe `passes` and `inapplicable` are huge and not actionable for the agents.
+    // Keep only actionable rule groups in both compact and full sidecars.
     const { passes: _passes, inapplicable: _inapplicable, ...axeActionable } =
       axe;
+    // axe.json is the default agent-facing evidence. It is intentionally compact.
     writeFileSync(
       join(runDir, "axe.json"),
       JSON.stringify(compactAxeResult(axeActionable), null, 2),
     );
+    // axe-full.json keeps the raw actionable detail for targeted debugging when
+    // compact samples omit a needed node or selector.
     writeFileSync(
       join(runDir, "axe-full.json"),
       JSON.stringify(axeActionable, null, 2),
@@ -433,6 +466,8 @@ async function extractFacts(page: Page): Promise<Facts> {
     const collapseWhitespace = /\s+/g;
     const clean = (s?: string | null) =>
       (s || "").replace(collapseWhitespace, " ").trim();
+    // Facts are a cheap source inventory for prompts. The per-category caps keep
+    // the initial brief useful on large pages without forcing raw HTML reads.
     const visible = (e: Element) => {
       const h = e as HTMLElement;
       const r = h.getBoundingClientRect();
@@ -501,6 +536,8 @@ async function check(
   const htmlPath = join(runDir, "transformed.html");
   if (!existsSync(htmlPath)) failures.push("transformed.html missing");
   else normalizeHtmlFile(htmlPath, originalUrl(runDir));
+  // The preview server makes local transformed.html behave like a real page:
+  // relative assets work, screenshots work, and axe sees browser-computed DOM.
   const preview = await serve(runDir, 0);
   const browser = await chromium.launch();
   let dom = { title: "", h1: 0, main: false };
@@ -524,6 +561,8 @@ async function check(
     if (dom.h1 !== 1) failures.push(`expected one h1, found ${dom.h1}`);
     if (!dom.main) failures.push("missing main");
     const axe = await new AxeBuilder({ page }).analyze();
+    // Return compact violations to agents but keep the full violation payload on
+    // disk. This is the core prompt-budget tradeoff in this profile.
     fullAxeViolations = axe.violations;
     axeViolations = compactAxeViolations(axe.violations);
     for (const v of axe.violations) failures.push(`axe ${v.id}: ${v.help}`);
@@ -556,6 +595,8 @@ async function check(
     mobileOverflow,
     axeViolations,
   };
+  // checks.json is written by core from this return value. The explicit full
+  // sidecar lives next to it for rare targeted node-level debugging.
   writeFullChecks(runDir, iteration, { ...result, axeViolations: fullAxeViolations });
   return result;
 }
@@ -602,6 +643,8 @@ function compactAxeResult<T extends {
   violations?: AxeViolationInput[];
   incomplete?: AxeViolationInput[];
 }>(axe: T) {
+  // Keep the original result shape so existing consumers can still look for
+  // `violations` and `incomplete`, but replace their heavy node payloads.
   return {
     ...axe,
     violations: compactAxeViolations(axe.violations || []),
@@ -611,6 +654,8 @@ function compactAxeResult<T extends {
 
 function compactAxeNode(node: AxeNodeInput) {
   const checks = compactChecksForNode(node);
+  // A sampled node keeps enough detail to identify and fix the issue: selector,
+  // clipped HTML, clipped failure summary, and clipped check messages.
   return omitUndefinedFields({
     target: truncateAxeTarget(node.target),
     impact: node.impact || undefined,
@@ -624,6 +669,8 @@ function compactAxeNode(node: AxeNodeInput) {
 }
 
 function compactChecksForNode(node: AxeNodeInput) {
+  // Axe separates checks into `any`, `all`, and `none`; keeping the group label
+  // helps a fixer understand why a node failed without preserving full payloads.
   return [
     ...compactCheckMessages("any", node.any),
     ...compactCheckMessages("all", node.all),
@@ -666,6 +713,10 @@ function stringArray(value: unknown): string[] | undefined {
 }
 
 function truncateEvidenceText(value: unknown, limit: number): string | undefined {
+  // This function exists because the compact files are prompt inputs. Axe can
+  // produce very long HTML snippets, summaries, messages, and selectors; after a
+  // few repeated nodes those dominate the context window. The raw sidecars remain
+  // available, so truncation removes bulk, not evidence ownership.
   if (typeof value !== "string") return undefined;
   const clean = value.replace(COLLAPSE_WHITESPACE, " ").trim();
   if (!clean) return undefined;
@@ -674,18 +725,24 @@ function truncateEvidenceText(value: unknown, limit: number): string | undefined
 }
 
 function omitUndefinedFields<T extends Record<string, unknown>>(value: T) {
+  // Compact JSON should omit missing fields instead of writing noisy null-ish
+  // placeholders that agents may treat as meaningful evidence.
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined),
   );
 }
 
 function writeFullChecks(runDir: string, iteration: number, result: CheckResult) {
+  // `check()` returns compact data because core writes that to checks.json. This
+  // sidecar preserves raw axe violations for humans or targeted agent reads.
   const iterDir = join(runDir, "iterations", String(iteration).padStart(3, "0"));
   mkdirSync(iterDir, { recursive: true });
   writeFileSync(join(iterDir, "checks-full.json"), JSON.stringify(result, null, 2));
 }
 
 function normalizeHtmlFile(file: string, baseUrl: string) {
+  // Fixer output is served from localhost during checks. Convert root-relative
+  // assets back to the original site so validation sees the intended resources.
   if (!baseUrl) return;
   const html = readFileSync(file, "utf8");
   const normalized = absolutizeHtmlResources(html, baseUrl);
@@ -693,6 +750,8 @@ function normalizeHtmlFile(file: string, baseUrl: string) {
 }
 
 function originalUrl(runDir: string) {
+  // facts.json is the only place that remembers the scanned URL after scan().
+  // If it is missing or malformed, URL normalization safely becomes a no-op.
   try {
     const facts = JSON.parse(
       readFileSync(join(runDir, "facts.json"), "utf8"),
@@ -725,6 +784,8 @@ function absolutizeHtmlResources(html: string, baseUrl: string) {
 }
 
 function absolutizeSrcset(value: string, baseUrl: string) {
+  // srcset candidates are comma-separated, with an optional width/density
+  // descriptor after the URL. Only the URL portion should be rewritten.
   return value
     .split(",")
     .map((candidate) => {
@@ -736,6 +797,9 @@ function absolutizeSrcset(value: string, baseUrl: string) {
 }
 
 function absolutizeUrl(value: string, baseUrl: string) {
+  // Only root-relative URLs need the original page origin. Absolute URLs,
+  // protocol-relative URLs, fragments, data URLs, and relative sibling paths are
+  // left unchanged.
   if (!value.startsWith("/") || value.startsWith("//")) return value;
   try {
     return new URL(value, baseUrl).href;
@@ -754,6 +818,8 @@ async function serve(runDir: string, preferredPort: number) {
       path === "/"
         ? join(runDir, "transformed.html")
         : resolve(root, `.${path}`);
+    // The resolved-path check prevents `../` and encoded traversal from escaping
+    // the run directory while still allowing nested local assets to be served.
     if (
       !(file === root || file.startsWith(`${root}/`)) ||
       !existsSync(file) ||
@@ -770,6 +836,8 @@ async function serve(runDir: string, preferredPort: number) {
 }
 
 function contentType(file: string) {
+  // Playwright/axe render pages through a real browser, so serving modern image
+  // and font MIME types matters for visual/layout-dependent checks.
   return (
     (
       {
