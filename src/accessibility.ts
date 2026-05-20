@@ -109,7 +109,7 @@ ${fileList([
   `${join(runDir, "original.html")} (targeted inspection only)`,
   join(runDir, "facts.json"),
   join(runDir, "axe.json"),
-  `${join(runDir, "axe-full.json")} (targeted debugging only)`,
+  `${join(runDir, "axe-full.json")} (targeted debugging only after compact axe id/target lacks detail)`,
 ])}
 
 ${TARGETED_EVIDENCE} Prefer facts.json and compact axe evidence before targeted original.html inspection.
@@ -145,7 +145,7 @@ ${fileList([
   `${join(runDir, "transformed.html")} (if present)`,
   `${join(iterDir, "checks.json")} (if present)`,
 ])}
-Use ${join(runDir, "original.html")} or ${join(runDir, "axe-full.json")} only for targeted verification when compact evidence is insufficient.`
+Use ${join(runDir, "original.html")} or ${join(runDir, "axe-full.json")} only for targeted verification when compact evidence is insufficient for a named id/target.`
     : `Use source evidence already in this reviewer session; do not re-load unchanged source artifacts wholesale.
 Available current and latest prior files:
 ${fileList([
@@ -154,7 +154,7 @@ ${fileList([
   `${join(previousIterationDir(runDir, iteration), "aggregate-feedback.json")} (latest prior summary, if needed)`,
   `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest prior solver notes, if needed)`,
 ])}
-Use ${join(previousIterationDir(runDir, iteration), "checks-full.json")} only for targeted debugging if compact checks lack enough element detail.`
+Use ${join(previousIterationDir(runDir, iteration), "checks-full.json")} only for targeted debugging after citing a compact check id/target that lacks enough element detail.`
 }
 ${TARGETED_EVIDENCE}
 Output: ${join(iterDir, "findings", `${reviewer.id}.json`)}
@@ -239,7 +239,7 @@ ${fileList([
   `${join(runDir, "original.html")} (implementation base only if no faithful transformed.html exists; otherwise targeted inspection)`,
   join(runDir, "facts.json"),
   join(runDir, "axe.json"),
-  `${join(runDir, "axe-full.json")} (targeted debugging only)`,
+  `${join(runDir, "axe-full.json")} (targeted debugging only after compact axe id/target lacks detail)`,
   join(runDir, "brief.md"),
   join(iterDir, "aggregate-feedback.json"),
   join(iterDir, "solver-task.md"),
