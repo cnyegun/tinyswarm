@@ -68,7 +68,7 @@ export type CheckResult = {
  * Passed to profile methods that need to read scan artifacts or write outputs
  * relative to a stable root.
  */
-export type RunContext = {
+export type RunPaths = {
   /** Absolute path to the project root; used to relativize all displayed paths. */
   rootDir: string;
   /** Absolute path to the timestamped directory for this run (e.g. `runs/2025-01-15T...`). */
@@ -76,11 +76,11 @@ export type RunContext = {
 };
 
 /**
- * Extends {@link RunContext} with per-iteration state.
+ * Extends {@link RunPaths} with per-iteration paths and numbering.
  * Passed to profile methods that generate prompts or consume outputs scoped to
  * a single iteration (findings, fix, vote, decision).
  */
-export type IterationContext = RunContext & {
+export type IterationPaths = RunPaths & {
   /** Absolute path to this iteration's output directory (e.g. `.../iterations/001`). */
   iterDir: string;
   /** 1-based iteration number within the current run. */
@@ -129,69 +129,69 @@ export type SwarmProfile = {
    * Fetches and analyzes the target input, writing raw artifacts to `ctx.runDir`.
    * Runs once at the start of the swarm before any agent sessions are opened.
    * @param input - URL or identifier of the resource to scan.
-   * @param ctx - Run-level filesystem context.
+   * @param ctx - Run-level filesystem paths.
    */
-  scan(input: string, ctx: RunContext): Promise<void>;
+  scan(input: string, ctx: RunPaths): Promise<void>;
 
   /**
    * Runs automated validation on the current state of the artifact.
    * Called after every fixer pass; results are written to `checks.json` and
    * fed into the vote and decision prompts.
-   * @param ctx - Run-level filesystem context.
+   * @param ctx - Run-level filesystem paths.
    * @param iteration - Current 1-based iteration number.
    */
-  check(ctx: RunContext, iteration: number): Promise<CheckResult>;
+  check(ctx: RunPaths, iteration: number): Promise<CheckResult>;
 
   /**
    * Returns the prompt that instructs the orchestrator to produce `brief.md` —
    * a high-level task description consumed by all subsequent agent prompts.
    */
-  briefPrompt(ctx: RunContext): string;
+  briefPrompt(ctx: RunPaths): string;
 
   /**
    * Returns the prompt for a reviewer agent to produce its `findings/<id>.json`
    * for the current iteration.
    */
-  findingsPrompt(ctx: IterationContext, reviewer: Reviewer): string;
+  findingsPrompt(ctx: IterationPaths, reviewer: Reviewer): string;
 
   /**
    * Returns the prompt that instructs the orchestrator to merge all reviewer
    * findings into `aggregate-feedback.json` and a `solver-task.md` work order.
    */
-  aggregatePrompt(ctx: IterationContext): string;
+  aggregatePrompt(ctx: IterationPaths): string;
 
   /**
    * Returns the prompt that instructs the fixer agent to apply changes and
    * write the updated artifact plus a `solver-result.json` summary.
    */
-  fixPrompt(ctx: IterationContext): string;
+  fixPrompt(ctx: IterationPaths): string;
 
   /**
    * Returns the prompt for a reviewer agent to cast its vote (`votes/<id>.json`)
    * based on the fixer's result and the automated check outcome.
    */
-  votePrompt(ctx: IterationContext, reviewer: Reviewer): string;
+  votePrompt(ctx: IterationPaths, reviewer: Reviewer): string;
 
   /**
    * Returns the prompt that instructs the orchestrator to read all votes and
    * write a `decision.json` with outcome, reason, and tally.
    */
-  decisionPrompt(ctx: IterationContext): string;
+  decisionPrompt(ctx: IterationPaths): string;
 
   /**
    * Returns the prompt that instructs the orchestrator to produce `report.md`
    * and `report.html` summarizing the entire run.
    * @param decision - Final decision from the last completed iteration, if one exists.
    */
-  reportPrompt(ctx: RunContext, decision?: Decision): string;
+  reportPrompt(ctx: RunPaths, decision?: Decision): string;
 };
 
 /**
  * Holds the live opencode server connection and the session ID registry.
- * Module-level singleton; created by {@link ensureHarness} and torn down
- * in the `finally` block of {@link runSwarm}.
+ * Created per swarm run by {@link ensureHarness} and torn down in the
+ * `finally` block of {@link runSwarm} when this process owns the server.
  */
-type Harness = {
+type AgentHarness = {
   /** Typed SDK client bound to `url`. */
   client: OpencodeClient;
   /** Base URL of the opencode server (either external or locally spawned). */
@@ -206,11 +206,27 @@ type Harness = {
   sessions: Record<string, string>;
 };
 
+/** Explicit per-run state threaded through operational helpers. */
+type RunState = RunPaths & {
+  /** Profile executing this run. */
+  profile: SwarmProfile;
+  /** Original input passed to {@link SwarmProfile.scan}. */
+  input: string;
+  /** Maximum number of reviewer/fixer iterations allowed for this run. */
+  maxIterations: number;
+  /** Absolute path to this run's structured log file. */
+  logFile: string;
+  /** Epoch ms when this run started; used for `+Nms` log offsets. */
+  started: number;
+  /** Live harness for this run, if initialized. */
+  harness?: AgentHarness;
+};
+
 /**
  * Snapshot of a single expected output file, used to detect whether the file
  * changed after a prompt was submitted.
  */
-type OutputState = {
+type FileOutputState = {
   /** Display path (relative to `rootDir`). */
   path: string;
   /** Whether the file exists on disk at the time of the snapshot. */
@@ -232,15 +248,6 @@ type OutputState = {
 const allowAll: PermissionRuleset = [
   { permission: "*", pattern: "*", action: "allow" },
 ];
-
-/** Singleton opencode harness; initialized once per {@link runSwarm} call, reset in `finally`. */
-let harness: Harness | undefined;
-
-/** Absolute path to the current run's log file; empty string before the first run. */
-let logFile = "";
-
-/** Epoch ms when the current run started; used to compute `+Nms` offsets in log lines. */
-let started = Date.now();
 
 /**
  * Executes a complete swarm run for the given profile and input.
@@ -285,44 +292,13 @@ export async function runSwarm(
   input: string,
   rootDir: string,
 ) {
-  const maxIterations = Math.max(
-    1,
-    Number(process.env.SWARM_MAX_ITERATIONS || 3),
-  );
-  const runDir = join(
-    rootDir,
-    "runs",
-    new Date().toISOString().replace(/[:.]/g, "-"),
-  );
-  mkdirSync(runDir, { recursive: true });
-  logFile = join(runDir, "swarm.log");
-  started = Date.now();
-  const model = modelSpec();
-
-  console.log(`Run: ${shown(rootDir, runDir)}`);
-  console.log(`Log: ${shown(rootDir, logFile)}`);
-  console.log(
-    `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
-  );
-
-  log("run", "starting", {
-    profile: profile.id,
-    input,
-    rootDir,
-    run: shown(rootDir, runDir),
-    maxIterations,
-    agent: process.env.SWARM_AGENT || "build",
-    model: modelName(model),
-    variant: model.variant,
-    timeoutMs: Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000),
-    pid: process.pid,
-    node: process.version,
-  });
+  const run = prepareRun(profile, input, rootDir);
+  const { maxIterations, runDir } = run;
 
   try {
-    const ctx = { rootDir, runDir };
+    const ctx: RunPaths = run;
     const scanStarted = Date.now();
-    log("scan", "starting", { profile: profile.id, input });
+    log(run, "scan", "starting", { profile: profile.id, input });
     progress("scan", `start url=${input}`);
     try {
       await profile.scan(input, ctx);
@@ -338,7 +314,7 @@ export async function runSwarm(
           ].map((path) => join(runDir, path)),
         )}`,
       );
-      log("scan", "done", {
+      log(run, "scan", "done", {
         elapsedMs: Date.now() - scanStarted,
         artifacts: [
           "original.html",
@@ -348,20 +324,19 @@ export async function runSwarm(
         ].map((path) => fileState(rootDir, join(runDir, path))),
       });
     } catch (error) {
-      log("scan", "failed", {
+      log(run, "scan", "failed", {
         elapsedMs: Date.now() - scanStarted,
         error: describe(error),
       });
       throw error;
     }
 
-    const active = await ensureHarness(rootDir, runDir);
+    const active = await ensureHarness(run);
     await promptAgent(
       active,
-      rootDir,
+      run,
       "orchestrator",
       "brief",
-      runDir,
       join(runDir, "prompts", "brief.md"),
       [join(runDir, "brief.md")],
       profile.briefPrompt(ctx),
@@ -373,7 +348,7 @@ export async function runSwarm(
       const iterCtx = { rootDir, runDir, iterDir, iteration };
       mkdirSync(join(iterDir, "findings"), { recursive: true });
       mkdirSync(join(iterDir, "votes"), { recursive: true });
-      log("iteration", "start", {
+      log(run, "iteration", "start", {
         iteration,
         iterDir: shown(rootDir, iterDir),
       });
@@ -384,10 +359,9 @@ export async function runSwarm(
         profile.reviewers.map((reviewer) =>
           promptAgent(
             active,
-            rootDir,
+            run,
             reviewer.id,
             "findings",
-            runDir,
             join(iterDir, "prompts", `${reviewer.id}-findings.md`),
             [join(iterDir, "findings", `${reviewer.id}.json`)],
             profile.findingsPrompt(iterCtx, reviewer),
@@ -397,10 +371,9 @@ export async function runSwarm(
 
       await promptAgent(
         active,
-        rootDir,
+        run,
         "orchestrator",
         "aggregate",
-        runDir,
         join(iterDir, "prompts", "aggregate.md"),
         [
           join(iterDir, "aggregate-feedback.json"),
@@ -410,23 +383,22 @@ export async function runSwarm(
       );
       await promptAgent(
         active,
-        rootDir,
+        run,
         "fixer",
         "fix",
-        runDir,
         join(iterDir, "prompts", "fix.md"),
         [join(runDir, profile.artifact), join(iterDir, "solver-result.json")],
         profile.fixPrompt(iterCtx),
       );
 
       const checkStarted = Date.now();
-      log("check", "start", { iteration });
+      log(run, "check", "start", { iteration });
       progress("check", `start iteration=${iteration}`);
       let checks: CheckResult;
       try {
         checks = await profile.check(ctx, iteration);
       } catch (error) {
-        log("check", "failed", {
+        log(run, "check", "failed", {
           iteration,
           elapsedMs: Date.now() - checkStarted,
           error: describe(error),
@@ -437,7 +409,7 @@ export async function runSwarm(
         join(iterDir, "checks.json"),
         JSON.stringify(checks, null, 2),
       );
-      log("check", checks.passed ? "passed" : "failed", {
+      log(run, "check", checks.passed ? "passed" : "failed", {
         iteration,
         elapsedMs: Date.now() - checkStarted,
         failures: checks.failures.length,
@@ -460,10 +432,9 @@ export async function runSwarm(
         profile.reviewers.map((reviewer) =>
           promptAgent(
             active,
-            rootDir,
+            run,
             reviewer.id,
             "vote",
-            runDir,
             join(iterDir, "prompts", `${reviewer.id}-vote.md`),
             [join(iterDir, "votes", `${reviewer.id}.json`)],
             profile.votePrompt(iterCtx, reviewer),
@@ -474,10 +445,9 @@ export async function runSwarm(
       const decisionFile = join(iterDir, "decision.json");
       await promptAgent(
         active,
-        rootDir,
+        run,
         "orchestrator",
         "decision",
-        runDir,
         join(iterDir, "prompts", "decision.md"),
         [decisionFile],
         profile.decisionPrompt(iterCtx),
@@ -494,7 +464,7 @@ export async function runSwarm(
         };
         writeFileSync(decisionFile, JSON.stringify(lastDecision, null, 2));
       }
-      log("decision", lastDecision.outcome, lastDecision);
+      log(run, "decision", lastDecision.outcome, lastDecision);
       progress(
         "decision",
         `outcome=${lastDecision.outcome} checksPass=${lastDecision.checksPass} accepts=${lastDecision.accepts} blocks=${lastDecision.blocks} reason=${quote(lastDecision.reason)}`,
@@ -504,16 +474,15 @@ export async function runSwarm(
 
     await promptAgent(
       active,
-      rootDir,
+      run,
       "orchestrator",
       "report",
-      runDir,
       join(runDir, "prompts", "report.md"),
       [join(runDir, "report.md"), join(runDir, "report.html")],
       profile.reportPrompt(ctx, lastDecision),
     );
-    const served = await serve(runDir, profile.artifact);
-    log("run", "completed", {
+    const served = await serve(run, profile.artifact);
+    log(run, "run", "completed", {
       decision: lastDecision,
       artifact: fileState(rootDir, join(runDir, profile.artifact)),
       report: fileState(rootDir, join(runDir, "report.html")),
@@ -524,56 +493,108 @@ export async function runSwarm(
     console.log(
       `Transformed: ${shown(rootDir, join(runDir, profile.artifact))}`,
     );
-    console.log(`Log: ${shown(rootDir, logFile)}`);
+    console.log(`Log: ${shown(rootDir, run.logFile)}`);
     console.log(`Local: http://localhost:${served.port}`);
   } finally {
-    if (harness?.close) log("opencode", "closing server", { url: harness.url });
-    else if (harness)
-      log("opencode", "leaving external server open", { url: harness.url });
-    harness?.close?.();
-    harness = undefined;
+    const activeHarness = run.harness;
+    if (activeHarness?.close)
+      log(run, "opencode", "closing server", { url: activeHarness.url });
+    else if (activeHarness)
+      log(run, "opencode", "leaving external server open", {
+        url: activeHarness.url,
+      });
+    activeHarness?.close?.();
+    run.harness = undefined;
   }
 }
 
 /**
- * Returns the active {@link Harness}, creating one if none exists.
+ * Creates the run directory and initializes explicit per-run operational state.
+ */
+function prepareRun(
+  profile: SwarmProfile,
+  input: string,
+  rootDir: string,
+): RunState {
+  const maxIterations = Math.max(
+    1,
+    Number(process.env.SWARM_MAX_ITERATIONS || 3),
+  );
+  const runDir = join(
+    rootDir,
+    "runs",
+    new Date().toISOString().replace(/[:.]/g, "-"),
+  );
+  mkdirSync(runDir, { recursive: true });
+  const run: RunState = {
+    profile,
+    input,
+    rootDir,
+    runDir,
+    maxIterations,
+    logFile: join(runDir, "swarm.log"),
+    started: Date.now(),
+  };
+  const model = modelSpec();
+
+  console.log(`Run: ${shown(rootDir, runDir)}`);
+  console.log(`Log: ${shown(rootDir, run.logFile)}`);
+  console.log(
+    `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
+  );
+
+  log(run, "run", "starting", {
+    profile: profile.id,
+    input,
+    rootDir,
+    run: shown(rootDir, runDir),
+    maxIterations,
+    agent: process.env.SWARM_AGENT || "build",
+    model: modelName(model),
+    variant: model.variant,
+    timeoutMs: Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000),
+    pid: process.pid,
+    node: process.version,
+  });
+
+  return run;
+}
+
+/**
+ * Returns the active {@link AgentHarness}, creating one if none exists.
  *
  * Precedence:
- * 1. Reuse the module-level singleton if already initialized.
+ * 1. Reuse the current run's harness if already initialized.
  * 2. Connect to an externally-managed server via `SWARM_OPENCODE_SERVER_URL`
  *    (or the legacy alias `TINY_OPENCODE_SERVER_URL`).
  * 3. Spawn a new in-process opencode server on an OS-assigned port.
  *
- * @param rootDir - Project root; passed through to log messages.
- * @param runDir - Current run directory; used in log context.
+ * @param run - Current run state; stores the initialized harness.
  * @returns The initialized harness with a live SDK client.
  * @throws If `createOpencode` fails to start the embedded server.
  */
-async function ensureHarness(
-  rootDir: string,
-  runDir: string,
-): Promise<Harness> {
-  if (harness) {
-    log("opencode", "reusing harness", {
-      url: harness.url,
-      sessions: Object.keys(harness.sessions).length,
+async function ensureHarness(run: RunState): Promise<AgentHarness> {
+  if (run.harness) {
+    log(run, "opencode", "reusing harness", {
+      url: run.harness.url,
+      sessions: Object.keys(run.harness.sessions).length,
     });
-    return harness;
+    return run.harness;
   }
   const url =
     process.env.SWARM_OPENCODE_SERVER_URL ||
     process.env.TINY_OPENCODE_SERVER_URL;
   if (url) {
-    harness = {
+    run.harness = {
       client: createOpencodeClient({ baseUrl: url }),
       url,
       sessions: {},
     };
-    log("opencode", "using existing server", { url });
-    return harness;
+    log(run, "opencode", "using existing server", { url });
+    return run.harness;
   }
   const serverStarted = Date.now();
-  log("opencode", "starting server", {
+  log(run, "opencode", "starting server", {
     hostname: "127.0.0.1",
     port: 0,
     timeout: 30000,
@@ -585,25 +606,25 @@ async function ensureHarness(
     timeout: 30000,
     config: { permission: "allow" },
   }).catch((error: unknown) => {
-    log("opencode", "start threw", {
+    log(run, "opencode", "start threw", {
       elapsedMs: Date.now() - serverStarted,
       error: describe(error),
     });
     throw error;
   });
-  harness = {
+  run.harness = {
     client: startedServer.client,
     url: startedServer.server.url,
     close: startedServer.server.close,
     sessions: {},
   };
-  log("opencode", "started server", {
-    url: harness.url,
+  log(run, "opencode", "started server", {
+    url: run.harness.url,
     permission: "allow",
-    run: shown(rootDir, runDir),
+    run: shown(run.rootDir, run.runDir),
     elapsedMs: Date.now() - serverStarted,
   });
-  return harness;
+  return run.harness;
 }
 
 /**
@@ -614,27 +635,25 @@ async function ensureHarness(
  * that progress can be inspected externally while the swarm is running.
  *
  * @param active - The live harness holding the SDK client and session registry.
- * @param rootDir - Project root for display paths.
+ * @param run - Current run state for display paths and logging.
  * @param key - Logical agent name (e.g. `"orchestrator"`, `"fixer"`, reviewer ID).
- * @param runDir - Current run directory; used for the session title and `sessions.json`.
  * @returns The opencode session ID string.
  * @throws If the SDK call returns an error response.
  */
 async function sessionFor(
-  active: Harness,
-  rootDir: string,
+  active: AgentHarness,
+  run: RunState,
   key: string,
-  runDir: string,
 ) {
   if (active.sessions[key]) {
-    log("session", "reuse", { key, id: active.sessions[key] });
+    log(run, "session", "reuse", { key, id: active.sessions[key] });
     return active.sessions[key];
   }
   const model = modelSpec();
   const agent = process.env.SWARM_AGENT || "build";
-  const title = `swarm ${key} ${relative(rootDir, runDir)}`;
+  const title = `swarm ${key} ${relative(run.rootDir, run.runDir)}`;
   const sessionStarted = Date.now();
-  log("session", "create start", {
+  log(run, "session", "create start", {
     key,
     title,
     agent,
@@ -644,7 +663,7 @@ async function sessionFor(
   });
   const result = await active.client.session
     .create({
-      directory: rootDir,
+      directory: run.rootDir,
       title,
       agent,
       model: {
@@ -655,7 +674,7 @@ async function sessionFor(
       permission: allowAll,
     })
     .catch((error: unknown) => {
-      log("session", "create threw", {
+      log(run, "session", "create threw", {
         key,
         elapsedMs: Date.now() - sessionStarted,
         error: describe(error),
@@ -663,7 +682,7 @@ async function sessionFor(
       throw error;
     });
   if (result.error) {
-    log("session", "create error", {
+    log(run, "session", "create error", {
       key,
       elapsedMs: Date.now() - sessionStarted,
       error: describe(result.error),
@@ -672,14 +691,14 @@ async function sessionFor(
   }
   active.sessions[key] = result.data.id;
   writeFileSync(
-    join(runDir, "sessions.json"),
+    join(run.runDir, "sessions.json"),
     JSON.stringify(active.sessions, null, 2),
   );
-  log("session", "created", {
+  log(run, "session", "created", {
     key,
     id: result.data.id,
     elapsedMs: Date.now() - sessionStarted,
-    sessionsFile: fileState(rootDir, join(runDir, "sessions.json")),
+    sessionsFile: fileState(run.rootDir, join(run.runDir, "sessions.json")),
   });
   return result.data.id;
 }
@@ -697,26 +716,24 @@ async function sessionFor(
  * to prove which process wrote it.
  *
  * @param active - Live harness with the SDK client.
- * @param rootDir - Project root for display paths and session directory.
+ * @param run - Current run state for display paths, session directory, and logging.
  * @param key - Logical agent name (matches a session key in `active.sessions`).
  * @param phase - Display label used in progress output (e.g. `"findings"`, `"fix"`).
- * @param runDir - Current run directory.
  * @param promptFile - Absolute path where the prompt markdown will be saved.
  * @param outputs - Absolute paths of files expected to exist and change before this resolves.
  * @param text - The full prompt text to send.
  * @throws If the SDK rejects the prompt or if outputs are not ready before `SWARM_AGENT_TIMEOUT_MS`.
  */
 async function promptAgent(
-  active: Harness,
-  rootDir: string,
+  active: AgentHarness,
+  run: RunState,
   key: string,
   phase: string,
-  runDir: string,
   promptFile: string,
   outputs: string[],
   text: string,
 ) {
-  const sessionID = await sessionFor(active, rootDir, key, runDir);
+  const sessionID = await sessionFor(active, run, key);
   const model = modelSpec();
   const agent = process.env.SWARM_AGENT || "build";
   const before = outputTimes(outputs);
@@ -727,28 +744,28 @@ async function promptAgent(
     phase,
     `${key} session=${shortID(sessionID)} outputs=${outputs.map(outputName).join(",")} prompt=${formatBytes(Buffer.byteLength(text, "utf8"))}`,
   );
-  log("prompt", "start", {
+  log(run, "prompt", "start", {
     key,
     sessionID,
     method: "promptAsync",
     agent,
     model: modelName(model),
     variant: model.variant,
-    promptFile: shown(rootDir, promptFile),
+    promptFile: shown(run.rootDir, promptFile),
     promptBytes: Buffer.byteLength(text, "utf8"),
-    outputs: outputStates(rootDir, outputs, before),
+    outputs: outputStates(run.rootDir, outputs, before),
   });
   const result = await active.client.session
     .promptAsync({
       sessionID,
-      directory: rootDir,
+      directory: run.rootDir,
       agent,
       model: { providerID: model.providerID, modelID: model.modelID },
       variant: model.variant,
       parts: [{ type: "text", text }],
     })
     .catch((error: unknown) => {
-      log("prompt", "submit threw", {
+      log(run, "prompt", "submit threw", {
         key,
         sessionID,
         elapsedMs: Date.now() - promptStarted,
@@ -757,7 +774,7 @@ async function promptAgent(
       throw error;
     });
   if (result.error) {
-    log("prompt", "submit error", {
+    log(run, "prompt", "submit error", {
       key,
       sessionID,
       elapsedMs: Date.now() - promptStarted,
@@ -767,19 +784,19 @@ async function promptAgent(
       `session prompt failed for ${key}: ${describe(result.error)}`,
     );
   }
-  log("prompt", "accepted", {
+  log(run, "prompt", "accepted", {
     key,
     sessionID,
     elapsedMs: Date.now() - promptStarted,
     response: summarizeData(result.data),
   });
   progress(phase, `${key} accepted in ${duration(promptStarted)}`);
-  const finalOutputs = await waitForOutputs(rootDir, outputs, before, {
+  const finalOutputs = await waitForOutputs(run, outputs, before, {
     key,
     phase,
     sessionID,
   });
-  log("prompt", "done", {
+  log(run, "prompt", "done", {
     key,
     sessionID,
     elapsedMs: Date.now() - promptStarted,
@@ -808,7 +825,7 @@ function outputTimes(outputs: string[]) {
 }
 
 /**
- * Builds an array of {@link OutputState} objects that compare current disk state
+ * Builds an array of {@link FileOutputState} objects that compare current disk state
  * against the pre-prompt baseline captured by {@link outputTimes}.
  *
  * @param rootDir - Project root for display paths.
@@ -819,7 +836,7 @@ function outputStates(
   rootDir: string,
   outputs: string[],
   before: Map<string, number>,
-): OutputState[] {
+): FileOutputState[] {
   return outputs.map((path) => {
     const previousMtimeMs = before.get(path) || 0;
     const state = fileState(rootDir, path);
@@ -855,19 +872,19 @@ function fileState(rootDir: string, path: string) {
  * Uses a 500 ms sleep between polls to avoid hot-spinning while outputs are being written.
  * Logs progress at `SWARM_WAIT_LOG_INTERVAL_MS` intervals (default 10 s).
  *
- * @param rootDir - Project root for display paths.
+ * @param run - Current run state for display paths and logging.
  * @param outputs - Absolute paths that must exist and have newer mtimes.
  * @param before - Pre-prompt mtime baseline from {@link outputTimes}.
  * @param details - Context included in every log line (key, phase, sessionID).
- * @returns Resolves with the final {@link OutputState} array once all outputs are ready.
+ * @returns Resolves with the final {@link FileOutputState} array once all outputs are ready.
  * @throws `Error` if `SWARM_AGENT_TIMEOUT_MS` elapses before all outputs are ready.
  */
 async function waitForOutputs(
-  rootDir: string,
+  run: RunState,
   outputs: string[],
   before: Map<string, number>,
   details: { key: string; phase: string; sessionID: string },
-): Promise<OutputState[]> {
+): Promise<FileOutputState[]> {
   const timeoutMs = Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000);
   const logIntervalMs = Math.max(
     1000,
@@ -875,17 +892,17 @@ async function waitForOutputs(
   );
   const startedAt = Date.now();
   let nextLogAt = startedAt + logIntervalMs;
-  log("prompt", "wait start", {
+  log(run, "prompt", "wait start", {
     ...details,
     timeoutMs,
     logIntervalMs,
-    outputs: outputStates(rootDir, outputs, before),
+    outputs: outputStates(run.rootDir, outputs, before),
   });
   while (Date.now() - startedAt < timeoutMs) {
-    const states = outputStates(rootDir, outputs, before);
+    const states = outputStates(run.rootDir, outputs, before);
     if (states.every((state) => state.exists && state.changed)) return states;
     if (Date.now() >= nextLogAt) {
-      log("prompt", "wait", {
+      log(run, "prompt", "wait", {
         ...details,
         elapsedMs: Date.now() - startedAt,
         outputs: states,
@@ -898,13 +915,13 @@ async function waitForOutputs(
     }
     await sleep(500);
   }
-  log("prompt", "wait timeout", {
+  log(run, "prompt", "wait timeout", {
     ...details,
     elapsedMs: Date.now() - startedAt,
-    outputs: outputStates(rootDir, outputs, before),
+    outputs: outputStates(run.rootDir, outputs, before),
   });
   throw new Error(
-    `timed out waiting for ${outputs.map((path) => shown(rootDir, path)).join(", ")}`,
+    `timed out waiting for ${outputs.map((path) => shown(run.rootDir, path)).join(", ")}`,
   );
 }
 
@@ -955,12 +972,13 @@ function readDecision(file: string): Decision {
  * Any other path is resolved relative to `runDir` after a path-traversal guard.
  * Tries port 5177 first; falls back to an OS-assigned port if that port is taken.
  *
- * @param runDir - Absolute path to the run directory to serve.
+ * @param run - Current run state whose directory will be served.
  * @param artifact - Profile artifact filename (e.g. `"fixed.html"`), used for the `/` route.
  * @param preferredPort - Port to try first; defaults to `5177`.
  * @returns Object with the live `server` instance and the actual bound `port`.
  */
-async function serve(runDir: string, artifact: string, preferredPort = 5177) {
+async function serve(run: RunState, artifact: string, preferredPort = 5177) {
+  const { runDir } = run;
   const root = resolve(runDir);
   const server = createServer((req, res) => {
     const path = decodeURIComponent(
@@ -994,7 +1012,7 @@ async function serve(runDir: string, artifact: string, preferredPort = 5177) {
     (e: NodeJS.ErrnoException) =>
       e.code === "EADDRINUSE" ? listen(server, 0) : Promise.reject(e),
   );
-  log("serve", "listening", { port });
+  log(run, "serve", "listening", { port });
   return { server, port };
 }
 
@@ -1058,16 +1076,16 @@ function modelName(model: { providerID: string; modelID: string }) {
 
 /**
  * Appends a structured log line to the run's `swarm.log` file.
- * No-ops before `logFile` is set (i.e. before `runSwarm` initializes the run directory).
  *
+ * @param run - Current run state containing the log file and start time.
  * @param step - High-level phase label (e.g. `"scan"`, `"prompt"`, `"decision"`).
  * @param message - Short event description (e.g. `"starting"`, `"done"`, `"timeout"`).
  * @param data - Optional structured data serialized as JSON on the same line.
  */
-function log(step: string, message: string, data?: unknown) {
+function log(run: RunState, step: string, message: string, data?: unknown) {
   const suffix = data === undefined ? "" : ` ${serialize(data)}`;
-  const line = `${new Date().toISOString()} +${Date.now() - started}ms ${step} ${message}${suffix}\n`;
-  if (logFile) appendFileSync(logFile, line);
+  const line = `${new Date().toISOString()} +${Date.now() - run.started}ms ${step} ${message}${suffix}\n`;
+  appendFileSync(run.logFile, line);
 }
 
 /**
@@ -1110,11 +1128,11 @@ function artifactSummary(rootDir: string, paths: string[]) {
 }
 
 /**
- * Formats an array of {@link OutputState} objects as a compact `name=size` string.
+ * Formats an array of {@link FileOutputState} objects as a compact `name=size` string.
  *
  * @param states - Output states to format.
  */
-function formatStates(states: OutputState[]) {
+function formatStates(states: FileOutputState[]) {
   return states
     .map((state) =>
       state.exists
@@ -1131,7 +1149,7 @@ function formatStates(states: OutputState[]) {
  * @param states - Current output states from {@link outputStates}.
  * @param startedAt - Epoch ms when the wait loop started.
  */
-function waitSummary(states: OutputState[], startedAt: number) {
+function waitSummary(states: FileOutputState[], startedAt: number) {
   const done = states
     .filter((state) => state.exists && state.changed)
     .map((state) => outputName(state.path));
