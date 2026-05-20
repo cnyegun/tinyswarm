@@ -253,7 +253,8 @@ async function scan(url: string, { runDir }: { runDir: string }) {
       absolutizeHtmlResources(await page.content(), page.url()),
     );
     writeFileSync(join(runDir, "facts.json"), JSON.stringify(facts, null, 2));
-    writeFileSync(join(runDir, "axe.json"), JSON.stringify(axe, null, 2));
+    const { passes: _passes, inapplicable: _inapplicable, ...axeCompact } = axe;
+    writeFileSync(join(runDir, "axe.json"), JSON.stringify(axeCompact, null, 2));
   } finally {
     await browser.close();
   }
