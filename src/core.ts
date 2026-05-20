@@ -293,183 +293,46 @@ export async function runSwarm(
   rootDir: string,
 ) {
   const run = prepareRun(profile, input, rootDir);
-  const { maxIterations, runDir } = run;
 
   try {
-    const ctx: RunPaths = run;
+    // Keep runSwarm as the table of contents: source capture, agent loop,
+    // final report, preview, cleanup. Phase helpers own the operational detail.
     await runScan(run);
 
-    const active = await ensureHarness(run);
-    await writeBrief(run, active);
+    const harness = await ensureHarness(run);
+    await writeBrief(run, harness);
 
     let lastDecision: Decision | undefined;
-    for (let iteration = 1; iteration <= maxIterations; iteration++) {
-      const iterDir = join(runDir, "iterations", pad(iteration));
-      const iterCtx = { rootDir, runDir, iterDir, iteration };
-      mkdirSync(join(iterDir, "findings"), { recursive: true });
-      mkdirSync(join(iterDir, "votes"), { recursive: true });
-      log(run, "iteration", "start", {
-        iteration,
-        iterDir: shown(rootDir, iterDir),
-      });
-      progress(`iteration ${iteration}/${maxIterations}`, "start");
-
-      // All reviewers run independently; parallelize to cut wall-clock time.
-      await Promise.all(
-        profile.reviewers.map((reviewer) =>
-          promptAgent(
-            active,
-            run,
-            reviewer.id,
-            "findings",
-            join(iterDir, "prompts", `${reviewer.id}-findings.md`),
-            [join(iterDir, "findings", `${reviewer.id}.json`)],
-            profile.findingsPrompt(iterCtx, reviewer),
-          ),
-        ),
-      );
-
-      await promptAgent(
-        active,
-        run,
-        "orchestrator",
-        "aggregate",
-        join(iterDir, "prompts", "aggregate.md"),
-        [
-          join(iterDir, "aggregate-feedback.json"),
-          join(iterDir, "solver-task.md"),
-        ],
-        profile.aggregatePrompt(iterCtx),
-      );
-      await promptAgent(
-        active,
-        run,
-        "fixer",
-        "fix",
-        join(iterDir, "prompts", "fix.md"),
-        [join(runDir, profile.artifact), join(iterDir, "solver-result.json")],
-        profile.fixPrompt(iterCtx),
-      );
-
-      const checkStarted = Date.now();
-      log(run, "check", "start", { iteration });
-      progress("check", `start iteration=${iteration}`);
-      let checks: CheckResult;
-      try {
-        checks = await profile.check(ctx, iteration);
-      } catch (error) {
-        log(run, "check", "failed", {
-          iteration,
-          elapsedMs: Date.now() - checkStarted,
-          error: describe(error),
-        });
-        throw error;
-      }
-      writeFileSync(
-        join(iterDir, "checks.json"),
-        JSON.stringify(checks, null, 2),
-      );
-      log(run, "check", checks.passed ? "passed" : "failed", {
-        iteration,
-        elapsedMs: Date.now() - checkStarted,
-        failures: checks.failures.length,
-        output: fileState(rootDir, join(iterDir, "checks.json")),
-      });
-      progress(
-        "check",
-        `${checks.passed ? "passed" : "failed"} ${duration(checkStarted)} failures=${checks.failures.length}`,
-      );
-      for (const failure of checks.failures.slice(0, 3))
-        progress("check", `failure: ${failure}`);
-      if (checks.failures.length > 3)
-        progress(
-          "check",
-          `...${checks.failures.length - 3} more failures in checks.json`,
-        );
-
-      // Votes are also independent; parallelize the same way as findings.
-      await Promise.all(
-        profile.reviewers.map((reviewer) =>
-          promptAgent(
-            active,
-            run,
-            reviewer.id,
-            "vote",
-            join(iterDir, "prompts", `${reviewer.id}-vote.md`),
-            [join(iterDir, "votes", `${reviewer.id}.json`)],
-            profile.votePrompt(iterCtx, reviewer),
-          ),
-        ),
-      );
-
-      const decisionFile = join(iterDir, "decision.json");
-      await promptAgent(
-        active,
-        run,
-        "orchestrator",
-        "decision",
-        join(iterDir, "prompts", "decision.md"),
-        [decisionFile],
-        profile.decisionPrompt(iterCtx),
-      );
-      lastDecision = readDecision(decisionFile);
-
-      // Cap a lingering "continue" at the last iteration so decision.json
-      // and the final report always get a terminal outcome.
-      if (lastDecision.outcome === "continue" && iteration === maxIterations) {
-        lastDecision = {
-          ...lastDecision,
-          outcome: "stop_with_risks",
-          reason: `max iterations reached: ${lastDecision.reason}`,
-        };
-        writeFileSync(decisionFile, JSON.stringify(lastDecision, null, 2));
-      }
-      log(run, "decision", lastDecision.outcome, lastDecision);
-      progress(
-        "decision",
-        `outcome=${lastDecision.outcome} checksPass=${lastDecision.checksPass} accepts=${lastDecision.accepts} blocks=${lastDecision.blocks} reason=${quote(lastDecision.reason)}`,
-      );
+    for (let iteration = 1; iteration <= run.maxIterations; iteration++) {
+      lastDecision = await runIteration(run, harness, iteration);
       if (lastDecision.outcome !== "continue") break;
     }
 
-    await promptAgent(
-      active,
-      run,
-      "orchestrator",
-      "report",
-      join(runDir, "prompts", "report.md"),
-      [join(runDir, "report.md"), join(runDir, "report.html")],
-      profile.reportPrompt(ctx, lastDecision),
-    );
-    const served = await serve(run, profile.artifact);
+    await writeFinalReport(run, harness, lastDecision);
+    const served = await serve(run, run.profile.artifact);
     log(run, "run", "completed", {
       decision: lastDecision,
-      artifact: fileState(rootDir, join(runDir, profile.artifact)),
-      report: fileState(rootDir, join(runDir, "report.html")),
+      artifact: fileState(run.rootDir, join(run.runDir, run.profile.artifact)),
+      report: fileState(run.rootDir, join(run.runDir, "report.html")),
     });
-    console.log(`Run: ${shown(rootDir, runDir)}`);
-    console.log(`Brief: ${shown(rootDir, join(runDir, "brief.md"))}`);
-    console.log(`Report: ${shown(rootDir, join(runDir, "report.html"))}`);
+    console.log(`Run: ${shown(run.rootDir, run.runDir)}`);
+    console.log(`Brief: ${shown(run.rootDir, join(run.runDir, "brief.md"))}`);
+    console.log(`Report: ${shown(run.rootDir, join(run.runDir, "report.html"))}`);
     console.log(
-      `Transformed: ${shown(rootDir, join(runDir, profile.artifact))}`,
+      `Transformed: ${shown(run.rootDir, join(run.runDir, run.profile.artifact))}`,
     );
-    console.log(`Log: ${shown(rootDir, run.logFile)}`);
+    console.log(`Log: ${shown(run.rootDir, run.logFile)}`);
     console.log(`Local: http://localhost:${served.port}`);
   } finally {
-    const activeHarness = run.harness;
-    if (activeHarness?.close)
-      log(run, "opencode", "closing server", { url: activeHarness.url });
-    else if (activeHarness)
-      log(run, "opencode", "leaving external server open", {
-        url: activeHarness.url,
-      });
-    activeHarness?.close?.();
-    run.harness = undefined;
+    closeHarness(run);
   }
 }
 
 /**
- * Creates the run directory and initializes explicit per-run operational state.
+ * Creates the one state object for this run.
+ *
+ * runSwarm calls this first so every later helper writes to the same run
+ * directory, log file, and timestamp base without relying on module globals.
  */
 function prepareRun(
   profile: SwarmProfile,
@@ -521,8 +384,11 @@ function prepareRun(
 }
 
 /**
- * Runs the profile-owned scan phase and records the artifacts operators expect
- * to inspect before any agent sessions are opened.
+ * Captures the source evidence before opening any agent sessions.
+ *
+ * If scanning fails, there is no useful swarm job to run, so runSwarm stops
+ * here. On success, the expected source artifacts are logged for operators who
+ * inspect runs/<timestamp>/ by hand.
  */
 async function runScan(run: RunState) {
   const { profile, input, rootDir, runDir } = run;
@@ -559,10 +425,16 @@ async function runScan(run: RunState) {
   }
 }
 
-/** Writes the shared brief that every later agent phase reads. */
-async function writeBrief(run: RunState, active: AgentHarness) {
+/**
+ * Asks the orchestrator for the shared brief.
+ *
+ * runSwarm does this once after scanning so reviewers and the fixer start from
+ * the same task framing instead of each agent independently interpreting raw
+ * source evidence.
+ */
+async function writeBrief(run: RunState, harness: AgentHarness) {
   await promptAgent(
-    active,
+    harness,
     run,
     "orchestrator",
     "brief",
@@ -570,6 +442,251 @@ async function writeBrief(run: RunState, active: AgentHarness) {
     [join(run.runDir, "brief.md")],
     run.profile.briefPrompt(run),
   );
+}
+
+/**
+ * Creates the filesystem contract for one iteration.
+ *
+ * Example: iteration 1 gets `iterations/001/findings/` and
+ * `iterations/001/votes/`. runIteration uses this context for every prompt in
+ * the cycle so all agent outputs land under the same iteration directory.
+ */
+function prepareIteration(run: RunState, iteration: number): IterationPaths {
+  const iterDir = join(run.runDir, "iterations", pad(iteration));
+  const iter: IterationPaths = {
+    rootDir: run.rootDir,
+    runDir: run.runDir,
+    iterDir,
+    iteration,
+  };
+  mkdirSync(join(iterDir, "findings"), { recursive: true });
+  mkdirSync(join(iterDir, "votes"), { recursive: true });
+  log(run, "iteration", "start", {
+    iteration,
+    iterDir: shown(run.rootDir, iterDir),
+  });
+  progress(`iteration ${iteration}/${run.maxIterations}`, "start");
+  return iter;
+}
+
+/**
+ * Runs one complete improvement cycle.
+ *
+ * This is the core loop body used by runSwarm. The order is the contract:
+ * reviewers find issues, the orchestrator turns them into a task, the fixer
+ * writes the artifact, automated checks run, reviewers vote, then the
+ * orchestrator decides whether to stop or continue.
+ */
+async function runIteration(
+  run: RunState,
+  harness: AgentHarness,
+  iteration: number,
+): Promise<Decision> {
+  const iter = prepareIteration(run, iteration);
+  await collectFindings(run, harness, iter);
+  await promptAgent(
+    harness,
+    run,
+    "orchestrator",
+    "aggregate",
+    join(iter.iterDir, "prompts", "aggregate.md"),
+    [
+      join(iter.iterDir, "aggregate-feedback.json"),
+      join(iter.iterDir, "solver-task.md"),
+    ],
+    run.profile.aggregatePrompt(iter),
+  );
+  await promptAgent(
+    harness,
+    run,
+    "fixer",
+    "fix",
+    join(iter.iterDir, "prompts", "fix.md"),
+    [
+      join(run.runDir, run.profile.artifact),
+      join(iter.iterDir, "solver-result.json"),
+    ],
+    run.profile.fixPrompt(iter),
+  );
+  await runChecks(run, iter);
+  await collectVotes(run, harness, iter);
+  return decideIteration(run, harness, iter);
+}
+
+/**
+ * Collects reviewer findings for the current artifact state.
+ *
+ * Reviewers are independent specialists, so running them in parallel preserves
+ * the same contract while avoiding unnecessary wall-clock delay.
+ */
+async function collectFindings(
+  run: RunState,
+  harness: AgentHarness,
+  iter: IterationPaths,
+) {
+  await Promise.all(
+    run.profile.reviewers.map((reviewer) =>
+      promptAgent(
+        harness,
+        run,
+        reviewer.id,
+        "findings",
+        join(iter.iterDir, "prompts", `${reviewer.id}-findings.md`),
+        [join(iter.iterDir, "findings", `${reviewer.id}.json`)],
+        run.profile.findingsPrompt(iter, reviewer),
+      ),
+    ),
+  );
+}
+
+/**
+ * Runs deterministic validation after the fixer writes the candidate artifact.
+ *
+ * The resulting checks.json becomes evidence for both reviewer votes and the
+ * orchestrator decision, so it must happen after fixing and before voting.
+ */
+async function runChecks(run: RunState, iter: IterationPaths) {
+  const checkStarted = Date.now();
+  log(run, "check", "start", { iteration: iter.iteration });
+  progress("check", `start iteration=${iter.iteration}`);
+  let checks: CheckResult;
+  try {
+    checks = await run.profile.check(run, iter.iteration);
+  } catch (error) {
+    log(run, "check", "failed", {
+      iteration: iter.iteration,
+      elapsedMs: Date.now() - checkStarted,
+      error: describe(error),
+    });
+    throw error;
+  }
+  const checksFile = join(iter.iterDir, "checks.json");
+  writeFileSync(checksFile, JSON.stringify(checks, null, 2));
+  log(run, "check", checks.passed ? "passed" : "failed", {
+    iteration: iter.iteration,
+    elapsedMs: Date.now() - checkStarted,
+    failures: checks.failures.length,
+    output: fileState(run.rootDir, checksFile),
+  });
+  progress(
+    "check",
+    `${checks.passed ? "passed" : "failed"} ${duration(checkStarted)} failures=${checks.failures.length}`,
+  );
+  for (const failure of checks.failures.slice(0, 3))
+    progress("check", `failure: ${failure}`);
+  if (checks.failures.length > 3)
+    progress(
+      "check",
+      `...${checks.failures.length - 3} more failures in checks.json`,
+    );
+}
+
+/**
+ * Collects reviewer votes after automated checks are available.
+ *
+ * Votes mirror findings: each reviewer can judge the candidate independently,
+ * but now with transformed artifact, solver result, and checks.json evidence.
+ */
+async function collectVotes(
+  run: RunState,
+  harness: AgentHarness,
+  iter: IterationPaths,
+) {
+  await Promise.all(
+    run.profile.reviewers.map((reviewer) =>
+      promptAgent(
+        harness,
+        run,
+        reviewer.id,
+        "vote",
+        join(iter.iterDir, "prompts", `${reviewer.id}-vote.md`),
+        [join(iter.iterDir, "votes", `${reviewer.id}.json`)],
+        run.profile.votePrompt(iter, reviewer),
+      ),
+    ),
+  );
+}
+
+/**
+ * Produces and normalizes the iteration decision.
+ *
+ * runSwarm uses this return value to either break the loop or continue. The
+ * helper also caps a final `continue` as `stop_with_risks` so the run always
+ * ends with a terminal decision in decision.json.
+ */
+async function decideIteration(
+  run: RunState,
+  harness: AgentHarness,
+  iter: IterationPaths,
+): Promise<Decision> {
+  const decisionFile = join(iter.iterDir, "decision.json");
+  await promptAgent(
+    harness,
+    run,
+    "orchestrator",
+    "decision",
+    join(iter.iterDir, "prompts", "decision.md"),
+    [decisionFile],
+    run.profile.decisionPrompt(iter),
+  );
+  let decision = readDecision(decisionFile);
+
+  // A final `continue` would leave the run without a terminal verdict, so cap
+  // it honestly as `stop_with_risks` and keep decision.json consistent.
+  if (decision.outcome === "continue" && iter.iteration === run.maxIterations) {
+    decision = {
+      ...decision,
+      outcome: "stop_with_risks",
+      reason: `max iterations reached: ${decision.reason}`,
+    };
+    writeFileSync(decisionFile, JSON.stringify(decision, null, 2));
+  }
+  log(run, "decision", decision.outcome, decision);
+  progress(
+    "decision",
+    `outcome=${decision.outcome} checksPass=${decision.checksPass} accepts=${decision.accepts} blocks=${decision.blocks} reason=${quote(decision.reason)}`,
+  );
+  return decision;
+}
+
+/**
+ * Writes the human-facing report after the loop has a final decision.
+ *
+ * This stays separate from serving so report generation remains an agent file
+ * contract, while preview serving remains a local runtime concern.
+ */
+async function writeFinalReport(
+  run: RunState,
+  harness: AgentHarness,
+  decision?: Decision,
+) {
+  await promptAgent(
+    harness,
+    run,
+    "orchestrator",
+    "report",
+    join(run.runDir, "prompts", "report.md"),
+    [join(run.runDir, "report.md"), join(run.runDir, "report.html")],
+    run.profile.reportPrompt(run, decision),
+  );
+}
+
+/**
+ * Releases only the opencode server owned by this run.
+ *
+ * External servers are deliberately left running; locally-created servers are
+ * closed from runSwarm's finally block even when an earlier phase throws.
+ */
+function closeHarness(run: RunState) {
+  const harness = run.harness;
+  if (harness?.close)
+    log(run, "opencode", "closing server", { url: harness.url });
+  else if (harness)
+    log(run, "opencode", "leaving external server open", {
+      url: harness.url,
+    });
+  harness?.close?.();
+  run.harness = undefined;
 }
 
 /**
@@ -646,20 +763,20 @@ async function ensureHarness(run: RunState): Promise<AgentHarness> {
  * Session IDs are persisted to `sessions.json` in the run directory so
  * that progress can be inspected externally while the swarm is running.
  *
- * @param active - The live harness holding the SDK client and session registry.
+ * @param harness - The live harness holding the SDK client and session registry.
  * @param run - Current run state for display paths and logging.
  * @param key - Logical agent name (e.g. `"orchestrator"`, `"fixer"`, reviewer ID).
  * @returns The opencode session ID string.
  * @throws If the SDK call returns an error response.
  */
 async function sessionFor(
-  active: AgentHarness,
+  harness: AgentHarness,
   run: RunState,
   key: string,
 ) {
-  if (active.sessions[key]) {
-    log(run, "session", "reuse", { key, id: active.sessions[key] });
-    return active.sessions[key];
+  if (harness.sessions[key]) {
+    log(run, "session", "reuse", { key, id: harness.sessions[key] });
+    return harness.sessions[key];
   }
   const model = modelSpec();
   const agent = process.env.SWARM_AGENT || "build";
@@ -673,7 +790,7 @@ async function sessionFor(
     variant: model.variant,
     permission: "allow-all",
   });
-  const result = await active.client.session
+  const result = await harness.client.session
     .create({
       directory: run.rootDir,
       title,
@@ -701,10 +818,10 @@ async function sessionFor(
     });
     throw new Error(`session create failed: ${describe(result.error)}`);
   }
-  active.sessions[key] = result.data.id;
+  harness.sessions[key] = result.data.id;
   writeFileSync(
     join(run.runDir, "sessions.json"),
-    JSON.stringify(active.sessions, null, 2),
+    JSON.stringify(harness.sessions, null, 2),
   );
   log(run, "session", "created", {
     key,
@@ -727,9 +844,9 @@ async function sessionFor(
  * wrote the file; the code deliberately checks the file state instead of trying
  * to prove which process wrote it.
  *
- * @param active - Live harness with the SDK client.
+ * @param harness - Live harness with the SDK client.
  * @param run - Current run state for display paths, session directory, and logging.
- * @param key - Logical agent name (matches a session key in `active.sessions`).
+ * @param key - Logical agent name (matches a session key in `harness.sessions`).
  * @param phase - Display label used in progress output (e.g. `"findings"`, `"fix"`).
  * @param promptFile - Absolute path where the prompt markdown will be saved.
  * @param outputs - Absolute paths of files expected to exist and change before this resolves.
@@ -737,7 +854,7 @@ async function sessionFor(
  * @throws If the SDK rejects the prompt or if outputs are not ready before `SWARM_AGENT_TIMEOUT_MS`.
  */
 async function promptAgent(
-  active: AgentHarness,
+  harness: AgentHarness,
   run: RunState,
   key: string,
   phase: string,
@@ -745,7 +862,7 @@ async function promptAgent(
   outputs: string[],
   text: string,
 ) {
-  const sessionID = await sessionFor(active, run, key);
+  const sessionID = await sessionFor(harness, run, key);
   const model = modelSpec();
   const agent = process.env.SWARM_AGENT || "build";
   const before = outputTimes(outputs);
@@ -767,7 +884,7 @@ async function promptAgent(
     promptBytes: Buffer.byteLength(text, "utf8"),
     outputs: outputStates(run.rootDir, outputs, before),
   });
-  const result = await active.client.session
+  const result = await harness.client.session
     .promptAsync({
       sessionID,
       directory: run.rootDir,

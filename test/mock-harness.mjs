@@ -128,6 +128,7 @@ try {
   if (!prompts.some(p => p.text.includes("Color fixes must repair the whole computed color system") && p.text.includes("bg-background/85"))) throw new Error("fix prompt missing color guardrail");
   if (!existsSync(join(runDir, "prompts", "brief.md"))) throw new Error("brief prompt was not saved");
   if (!existsSync(join(runDir, "iterations", "001", "prompts", "fix.md"))) throw new Error("fix prompt was not saved");
+  if (!existsSync(join(runDir, "iterations", "001", "checks-full.json"))) throw new Error("checks-full.json was not saved");
   if (!existsSync(join(runDir, "prompts", "report.md"))) throw new Error("report prompt was not saved");
   console.log(`mock swarm test passed: ${local}`);
 } finally {
@@ -140,11 +141,7 @@ try {
 }
 
 async function writeMockOutput(prompt) {
-  const outputs = [...prompt.matchAll(/(?:Output|Outputs):[^\S\n]*([^\n]+)/g)].map(m => m[1].trim()).filter(p => p && !p.startsWith("- "));
-  for (const line of prompt.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("- /") || trimmed.startsWith("- ./")) outputs.push(trimmed.slice(2));
-  }
+  const outputs = outputPaths(prompt);
   if (outputs.some(p => p.endsWith("report.md"))) {
     write(outputs.find(p => p.endsWith("report.md")), "# Mock swarm report\n\nAccepted.\n");
     write(outputs.find(p => p.endsWith("report.html")), "<!doctype html><html lang=\"en\"><head><title>Mock swarm report</title></head><body><main><h1>Mock swarm report</h1><a href=\"/\">Transformed</a></main></body></html>");
@@ -163,14 +160,33 @@ async function writeMockOutput(prompt) {
   else if (outputs.some(p => p.endsWith("brief.md"))) write(outputs.find(p => p.endsWith("brief.md")), "# Mock accessibility brief\n\nReview the page.\n");
 }
 
+function outputPaths(prompt) {
+  const outputs = [];
+  let inOutputs = false;
+  for (const line of prompt.split("\n")) {
+    const trimmed = line.trim();
+    const oneLine = trimmed.match(/^Output:\s+(.+)$/);
+    if (oneLine) outputs.push(oneLine[1]);
+    if (trimmed === "Outputs:") {
+      inOutputs = true;
+      continue;
+    }
+    if (!inOutputs) continue;
+    if (!trimmed) break;
+    if (trimmed.startsWith("- /") || trimmed.startsWith("- ./")) {
+      outputs.push(trimmed.slice(2));
+    }
+  }
+  return outputs;
+}
+
 function html(broken) {
   if (broken) return `<!doctype html><html lang="en"><head><title>Mock Rewrite</title></head><body><h1>Mock Event</h1><p>Initial draft intentionally misses main.</p></body></html>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock Rewrite</title><style>body{margin:0;font:18px/1.6 Arial,sans-serif;color:#111;background:#fff}a:focus,button:focus{outline:3px solid #111;outline-offset:3px}main{max-width:70ch;margin:auto;padding:2rem}a{color:#0645ad}</style></head><body><header><nav aria-label="Primary"><a href="#main">Skip to content</a></nav></header><main id="main"><h1>Mock Event</h1><p>Accessible repaired page for builders and designers.</p><a href="/tickets">Get tickets for Mock Event</a></main><footer><p>Mock footer</p></footer></body></html>`;
 }
 
 function vote(prompt) {
-  const checksPath = prompt.match(/Read transformed\.html, ([^,]+checks\.json)/)?.[1];
-  const checks = checksPath && existsSync(checksPath) ? JSON.parse(readFileSync(checksPath, "utf8")) : { passed: false };
+  const checks = checksFromPrompt(prompt);
   return JSON.stringify({ vote: checks.passed ? "accept" : "revise", score: checks.passed ? 95 : 40, reason: checks.passed ? "passes mock checks" : "needs repair" }, null, 2);
 }
 
@@ -180,11 +196,16 @@ function finding(path) {
 }
 
 function decision(prompt) {
-  const iterDir = prompt.match(/Read ([^\n]+)checks\.json/)?.[1];
-  const checksPath = iterDir && `${iterDir}checks.json`;
-  const checks = checksPath && existsSync(checksPath) ? JSON.parse(readFileSync(checksPath, "utf8")) : { passed: false };
+  const checks = checksFromPrompt(prompt);
   const accepts = checks.passed ? 4 : 0;
   return JSON.stringify({ outcome: checks.passed ? "accept" : "continue", reason: checks.passed ? "passes mock checks" : "needs another iteration", checksPass: checks.passed, accepts, blocks: 0 }, null, 2);
+}
+
+function checksFromPrompt(prompt) {
+  const checksPath = prompt.match(/\/[^\s,;]+checks\.json/)?.[0];
+  return checksPath && existsSync(checksPath)
+    ? JSON.parse(readFileSync(checksPath, "utf8"))
+    : { passed: false };
 }
 
 function write(path, content) {

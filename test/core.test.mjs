@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const runner = join(here, "core-runner.mjs");
 const repoRoot = join(here, "..");
+const rawArtifactSentinels = [
+  "RAW_ORIGINAL_SENTINEL_DO_NOT_PROMPT",
+  "RAW_AXE_FULL_SENTINEL_DO_NOT_PROMPT",
+  "RAW_CHECKS_FULL_SENTINEL_DO_NOT_PROMPT",
+];
 
 test("runSwarm completes a one-iteration accepted run and writes the full artifact contract", async () => {
   const result = await runScenario("accept-first");
@@ -111,6 +116,32 @@ test("runSwarm waits for stale pre-existing outputs to be rewritten", async () =
   assertPhaseOrder(result, ["brief", "findings"]);
   assert.equal(await readText(result.runDir, "brief.md"), "# Brief\n\nScenario preexisting-brief\n");
   assert.match(await readText(result.runDir, "prompts/brief.md"), /PHASE: brief/);
+});
+
+test("runSwarm keeps prompt payloads path-only when artifacts are large", async () => {
+  const result = await runScenario("large-artifacts");
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.promptCount, 11);
+  assert.equal(
+    result.promptRequests.some(({ text }) => text.includes("axe-full.json")),
+    true,
+  );
+  assert.equal(
+    result.promptRequests.some(({ text }) => text.includes("checks-full.json")),
+    true,
+  );
+
+  for (const { phase, text } of result.promptRequests) {
+    assert.ok(text.length < 2500, `${phase} prompt too large: ${text.length}`);
+    for (const sentinel of rawArtifactSentinels) {
+      assert.equal(
+        text.includes(sentinel),
+        false,
+        `${phase} prompt included raw artifact content: ${sentinel}`,
+      );
+    }
+  }
 });
 
 test("runSwarm supports profiles with no reviewers", async () => {

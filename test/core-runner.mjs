@@ -24,6 +24,12 @@ const defaultReviewers = [
   { id: "gamma", name: "Gamma Reviewer" },
 ];
 
+const rawArtifactSentinels = {
+  original: "RAW_ORIGINAL_SENTINEL_DO_NOT_PROMPT",
+  axeFull: "RAW_AXE_FULL_SENTINEL_DO_NOT_PROMPT",
+  checksFull: "RAW_CHECKS_FULL_SENTINEL_DO_NOT_PROMPT",
+};
+
 const scenarios = {
   "accept-first": {
     maxIterations: "3",
@@ -35,6 +41,12 @@ const scenarios = {
     checks: [true],
     decisions: ["accept"],
     preexistingBrief: true,
+  },
+  "large-artifacts": {
+    maxIterations: "1",
+    checks: [true],
+    decisions: ["accept"],
+    largeArtifacts: true,
   },
   "no-reviewers": {
     maxIterations: "1",
@@ -315,12 +327,23 @@ function createProfile() {
       state.profileEvents.push({ type: "scan", input, runDir: ctx.runDir });
       if (scenario.scanThrows) throw new Error("scan exploded");
       mkdirSync(join(ctx.runDir, "screenshots"), { recursive: true });
-      writeTouched(join(ctx.runDir, "original.html"), `<main>${input}</main>`);
+      writeTouched(
+        join(ctx.runDir, "original.html"),
+        scenario.largeArtifacts
+          ? largeArtifact(rawArtifactSentinels.original)
+          : `<main>${input}</main>`,
+      );
       writeTouched(
         join(ctx.runDir, "facts.json"),
         JSON.stringify({ input, url: "https://example.test/source" }, null, 2),
       );
       writeTouched(join(ctx.runDir, "axe.json"), JSON.stringify({ violations: [] }));
+      if (scenario.largeArtifacts) {
+        writeTouched(
+          join(ctx.runDir, "axe-full.json"),
+          largeArtifact(rawArtifactSentinels.axeFull),
+        );
+      }
       writeTouched(join(ctx.runDir, "screenshots", "original.png"), "png");
       if (scenario.preexistingBrief)
         writeTouched(join(ctx.runDir, "brief.md"), "stale brief");
@@ -331,6 +354,17 @@ function createProfile() {
         throw new Error(`check exploded at ${iteration}`);
       if (scenario.malformedCheck === "missingFailures") {
         return { passed: true, iteration };
+      }
+      if (scenario.largeArtifacts) {
+        writeTouched(
+          join(
+            ctx.runDir,
+            "iterations",
+            String(iteration).padStart(3, "0"),
+            "checks-full.json",
+          ),
+          largeArtifact(rawArtifactSentinels.checksFull),
+        );
       }
       const passed = scenario.checks?.[iteration - 1] ?? true;
       return {
@@ -377,6 +411,7 @@ function createProfile() {
 }
 
 function promptText(phase, details, outputs) {
+  const availableFiles = scenario.largeArtifacts ? largeArtifactPaths(details) : [];
   const lines = [
     `PHASE: ${phase}`,
     details.iteration ? `ITERATION: ${details.iteration}` : undefined,
@@ -384,10 +419,26 @@ function promptText(phase, details, outputs) {
     `RUN_DIR: ${details.runDir}`,
     details.iterDir ? `ITER_DIR: ${details.iterDir}` : undefined,
     details.finalDecision ? `FINAL_DECISION: ${details.finalDecision}` : undefined,
+    availableFiles.length ? "AVAILABLE_FILES:" : undefined,
+    ...availableFiles.map((path) => `* ${path}`),
     "OUTPUTS:",
     ...outputs.map((output) => `- ${output}`),
   ].filter(Boolean);
   return `${lines.join("\n")}\n`;
+}
+
+function largeArtifactPaths(details) {
+  return [
+    join(details.runDir, "original.html"),
+    join(details.runDir, "axe.json"),
+    join(details.runDir, "axe-full.json"),
+    details.iterDir ? join(details.iterDir, "checks.json") : undefined,
+    details.iterDir ? join(details.iterDir, "checks-full.json") : undefined,
+  ].filter(Boolean);
+}
+
+function largeArtifact(sentinel) {
+  return `${sentinel}\n${"x".repeat(12000)}`;
 }
 
 async function startOpencodeServer() {
