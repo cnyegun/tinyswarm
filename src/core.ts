@@ -295,6 +295,8 @@ export async function runSwarm(
   const run = prepareRun(profile, input, rootDir);
 
   try {
+    // Keep runSwarm as the table of contents: source capture, agent loop,
+    // final report, preview, cleanup. Phase helpers own the operational detail.
     await runScan(run);
 
     const harness = await ensureHarness(run);
@@ -327,7 +329,10 @@ export async function runSwarm(
 }
 
 /**
- * Creates the run directory and initializes explicit per-run operational state.
+ * Creates the one state object for this run.
+ *
+ * runSwarm calls this first so every later helper writes to the same run
+ * directory, log file, and timestamp base without relying on module globals.
  */
 function prepareRun(
   profile: SwarmProfile,
@@ -379,8 +384,11 @@ function prepareRun(
 }
 
 /**
- * Runs the profile-owned scan phase and records the artifacts operators expect
- * to inspect before any agent sessions are opened.
+ * Captures the source evidence before opening any agent sessions.
+ *
+ * If scanning fails, there is no useful swarm job to run, so runSwarm stops
+ * here. On success, the expected source artifacts are logged for operators who
+ * inspect runs/<timestamp>/ by hand.
  */
 async function runScan(run: RunState) {
   const { profile, input, rootDir, runDir } = run;
@@ -417,7 +425,13 @@ async function runScan(run: RunState) {
   }
 }
 
-/** Writes the shared brief that every later agent phase reads. */
+/**
+ * Asks the orchestrator for the shared brief.
+ *
+ * runSwarm does this once after scanning so reviewers and the fixer start from
+ * the same task framing instead of each agent independently interpreting raw
+ * source evidence.
+ */
 async function writeBrief(run: RunState, harness: AgentHarness) {
   await promptAgent(
     harness,
@@ -431,8 +445,11 @@ async function writeBrief(run: RunState, harness: AgentHarness) {
 }
 
 /**
- * Creates the per-iteration file contract, such as `iterations/001/findings/`
- * and `iterations/001/votes/`, before reviewers start writing artifacts.
+ * Creates the filesystem contract for one iteration.
+ *
+ * Example: iteration 1 gets `iterations/001/findings/` and
+ * `iterations/001/votes/`. runIteration uses this context for every prompt in
+ * the cycle so all agent outputs land under the same iteration directory.
  */
 function prepareIteration(run: RunState, iteration: number): IterationPaths {
   const iterDir = join(run.runDir, "iterations", pad(iteration));
@@ -453,8 +470,12 @@ function prepareIteration(run: RunState, iteration: number): IterationPaths {
 }
 
 /**
- * Runs one full reviewer/fixer/check/vote/decision cycle. The order here is the
- * workflow contract: findings -> aggregate -> fix -> checks -> votes -> decision.
+ * Runs one complete improvement cycle.
+ *
+ * This is the core loop body used by runSwarm. The order is the contract:
+ * reviewers find issues, the orchestrator turns them into a task, the fixer
+ * writes the artifact, automated checks run, reviewers vote, then the
+ * orchestrator decides whether to stop or continue.
  */
 async function runIteration(
   run: RunState,
@@ -492,7 +513,12 @@ async function runIteration(
   return decideIteration(run, harness, iter);
 }
 
-/** Reviewers inspect independently, so this phase intentionally runs in parallel. */
+/**
+ * Collects reviewer findings for the current artifact state.
+ *
+ * Reviewers are independent specialists, so running them in parallel preserves
+ * the same contract while avoiding unnecessary wall-clock delay.
+ */
 async function collectFindings(
   run: RunState,
   harness: AgentHarness,
@@ -513,6 +539,12 @@ async function collectFindings(
   );
 }
 
+/**
+ * Runs deterministic validation after the fixer writes the candidate artifact.
+ *
+ * The resulting checks.json becomes evidence for both reviewer votes and the
+ * orchestrator decision, so it must happen after fixing and before voting.
+ */
 async function runChecks(run: RunState, iter: IterationPaths) {
   const checkStarted = Date.now();
   log(run, "check", "start", { iteration: iter.iteration });
@@ -549,7 +581,12 @@ async function runChecks(run: RunState, iter: IterationPaths) {
     );
 }
 
-/** Votes mirror findings: each reviewer can judge the candidate independently. */
+/**
+ * Collects reviewer votes after automated checks are available.
+ *
+ * Votes mirror findings: each reviewer can judge the candidate independently,
+ * but now with transformed artifact, solver result, and checks.json evidence.
+ */
 async function collectVotes(
   run: RunState,
   harness: AgentHarness,
@@ -570,6 +607,13 @@ async function collectVotes(
   );
 }
 
+/**
+ * Produces and normalizes the iteration decision.
+ *
+ * runSwarm uses this return value to either break the loop or continue. The
+ * helper also caps a final `continue` as `stop_with_risks` so the run always
+ * ends with a terminal decision in decision.json.
+ */
 async function decideIteration(
   run: RunState,
   harness: AgentHarness,
@@ -605,6 +649,12 @@ async function decideIteration(
   return decision;
 }
 
+/**
+ * Writes the human-facing report after the loop has a final decision.
+ *
+ * This stays separate from serving so report generation remains an agent file
+ * contract, while preview serving remains a local runtime concern.
+ */
 async function writeFinalReport(
   run: RunState,
   harness: AgentHarness,
@@ -621,6 +671,12 @@ async function writeFinalReport(
   );
 }
 
+/**
+ * Releases only the opencode server owned by this run.
+ *
+ * External servers are deliberately left running; locally-created servers are
+ * closed from runSwarm's finally block even when an earlier phase throws.
+ */
 function closeHarness(run: RunState) {
   const harness = run.harness;
   if (harness?.close)
