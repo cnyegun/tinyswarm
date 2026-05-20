@@ -79,13 +79,17 @@ const roleCriteria: Record<string, string> = {
 };
 
 const TARGETED_EVIDENCE =
-  "Inspect only the files and snippets needed for this phase. Use targeted reads/searches; do not load raw HTML, full axe nodes, or long artifacts wholesale.";
+  "Inspect only the files and snippets needed for this phase. Use targeted reads/searches; do not load raw HTML, full axe nodes, or long artifacts wholesale. Open full sidecars only after a compact finding/violation id or target needs missing detail.";
 
 const COMPACT_OUTPUT =
-  "Keep outputs compact and deduplicated. Summarize evidence; do not paste raw HTML, full axe nodes, or long repeated file excerpts.";
+  "Keep outputs compact and deduplicated. Reference finding ids, axe ids, and short element labels; keep evidence snippets brief and do not paste raw HTML, full axe nodes, or long repeated file excerpts.";
 
 function fileList(paths: string[]) {
   return paths.map((path) => `- ${path}`).join("\n");
+}
+
+function previousIterationDir(runDir: string, iteration: number) {
+  return join(runDir, "iterations", String(iteration - 1).padStart(3, "0"));
 }
 
 export const accessibilityProfile: SwarmProfile = {
@@ -139,17 +143,17 @@ ${fileList([
   join(runDir, "axe.json"),
   `${join(runDir, "transformed.html")} (if present)`,
   `${join(iterDir, "checks.json")} (if present)`,
-  `${join(runDir, "iterations")}/*/{aggregate-feedback.json,solver-result.json,checks.json} (if useful)`,
 ])}
 Use ${join(runDir, "original.html")} or ${join(runDir, "axe-full.json")} only for targeted verification when compact evidence is insufficient.`
     : `Use source evidence already in this reviewer session; do not re-load unchanged source artifacts wholesale.
-Available current files:
+Available current and latest prior files:
 ${fileList([
   join(runDir, "transformed.html"),
-  `${join(iterDir, "checks.json")} (if present)`,
-  `${join(runDir, "iterations")}/*/{aggregate-feedback.json,solver-result.json,checks.json} (as needed)`,
+  `${join(previousIterationDir(runDir, iteration), "checks.json")} (latest prior compact checks)`,
+  `${join(previousIterationDir(runDir, iteration), "aggregate-feedback.json")} (latest prior summary, if needed)`,
+  `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest prior solver notes, if needed)`,
 ])}
-Use ${join(iterDir, "checks-full.json")} only for targeted debugging if compact checks lack enough element detail.`
+Use ${join(previousIterationDir(runDir, iteration), "checks-full.json")} only for targeted debugging if compact checks lack enough element detail.`
 }
 ${TARGETED_EVIDENCE}
 Output: ${join(iterDir, "findings", `${reviewer.id}.json`)}
@@ -183,16 +187,22 @@ Available current files:
 ${fileList([
   `${join(iterDir, "findings")}/*.json`,
   join(runDir, "transformed.html"),
-  `${join(runDir, "iterations")}/*/{aggregate-feedback.json,solver-result.json,checks.json} (as needed)`,
+  ...(iteration > 1
+    ? [
+        `${join(previousIterationDir(runDir, iteration), "aggregate-feedback.json")} (latest prior summary, if needed)`,
+        `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest prior solver notes, if needed)`,
+        `${join(previousIterationDir(runDir, iteration), "checks.json")} (latest prior checks, if needed)`,
+      ]
+    : []),
 ])}
-Inspect only targeted snippets needed to resolve supported findings.
+Inspect only targeted snippets needed to resolve supported findings. Use latest prior iteration artifacts by default; inspect older iterations only to resolve a named regression or decision conflict.
 Outputs:
 - ${join(iterDir, "aggregate-feedback.json")}
 - ${join(iterDir, "solver-task.md")}
 
 aggregate-feedback.json must remain compatible with this shape:
 { "summary": "string", "priorities": ["short task"], "risks": ["short risk"] }
-You may make the strings rich and structured. Include evidence ids, severity, confidence, category, source reviewer, affected original/transformed content, and whether the item is a must-fix, should-fix, preservation guardrail, or residual risk.
+Keep summary to three sentences or fewer, priorities to the high-signal top eight, and risks to the high-signal top six. Reference evidence ids, severity, confidence, category, source reviewer, affected original/transformed content, and whether the item is a must-fix, should-fix, preservation guardrail, or residual risk; do not restate full evidence unless a short quote is necessary.
 
 Build a score-driven priority order:
 - Critical preservation regressions and blocked key tasks outrank cosmetic accessibility tweaks.
@@ -205,11 +215,11 @@ solver-task.md should tell the fixer exactly what to change and what not to chan
 - Source of truth: compact source evidence, targeted original/transformed snippets, brief.md, and this aggregate feedback.
 - Preservation requirements: preserve original brand feel, section order, substantive copy, CTAs, link destinations/text meaning, images/logos unless decorative, schedule details, judging criteria, partner/sponsor information, and any distinctive visual language unless accessibility requires a targeted adjustment.
 - Allowed removals: only the Lovable badge, purely decorative duplicated content, empty wrappers, or duplicate inaccessible controls when an accessible equivalent remains. Require a short justification for each removal.
-- Must-fix accessibility items: list each supported issue with evidence, affected element/section, user impact, and acceptance criteria.
+- Must-fix accessibility items: list each supported issue with evidence ids or short evidence, affected element/section, user impact, and acceptance criteria.
 - Faithful remediation constraints: prefer semantic HTML, corrected names/labels/alt text, contrast/focus/reflow CSS, and small structural repairs over wholesale redesign. Do not replace the page with a generic hero/features/testimonials/contact template. Do not rewrite CTAs into vague labels. Do not drop links or images to make axe pass.
 - Color/theme repair guardrail: treat background, foreground, muted, accent, link, and CTA/button colors as a paired system. If a task changes dark/light background utilities, also require matching foreground utilities, slash-opacity variants, bg-background opacity variants, body background, and default anchor/CTA colors so computed contrast passes. Do not accept token-name fixes without computed foreground/background contrast evidence.
 - Acceptance criteria: valid standalone HTML, title, exactly one h1, main landmark, no axe violations, no mobile horizontal overflow, visible focus styles, responsive layout, improved accessibility score, preserved key content and identity, no unsupported removals.
-- Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, preservationNotes, removedContent, and residualRisks if useful, while remaining simple JSON.
+- Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, preservationNotes, removedContent, and residualRisks if useful, while remaining simple compact JSON.
 
 ${COMPACT_OUTPUT}
 
@@ -225,7 +235,7 @@ ${
   iteration === 1
     ? `Available files:
 ${fileList([
-  `${join(runDir, "original.html")} (targeted inspection; may be used once as first transformed base if no preserved prior output exists)`,
+  `${join(runDir, "original.html")} (implementation base only if no faithful transformed.html exists; otherwise targeted inspection)`,
   join(runDir, "facts.json"),
   join(runDir, "axe.json"),
   `${join(runDir, "axe-full.json")} (targeted debugging only)`,
@@ -233,7 +243,7 @@ ${fileList([
   join(iterDir, "aggregate-feedback.json"),
   join(iterDir, "solver-task.md"),
 ])}
-Inspect only the source snippets needed to preserve and repair the page. If no preserved prior transformed.html exists, original.html may be used once as the implementation base; avoid copying raw HTML into notes or summaries.`
+Inspect only the source snippets needed to preserve and repair the page. The fixer is the only role allowed to load/copy original.html wholesale, and only once as the implementation base when no faithful transformed.html exists; never copy raw HTML into notes or summaries.`
     : `Use unchanged source evidence already in this fixer session; do not re-load unchanged source artifacts wholesale.
 Available current files:
 ${fileList([
@@ -263,7 +273,7 @@ Required accessibility baseline:
 - Use native HTML before ARIA. If ARIA is needed, follow WAI-ARIA Authoring Practices for roles, states, properties, names, keyboard behavior, and landmarks.
 
 Implementation guidance:
-- Start from targeted original snippets or the best prior transformed.html only if it preserved the original well. If prior output became generic or lost content, rebuild from targeted original sections and apply narrow fixes.
+- Start from the best prior transformed.html when it preserved the original well. If no faithful transformed.html exists, or prior output became generic or lost content, use original.html once as the implementation base or rebuild from targeted original sections, then apply narrow fixes.
 - Make the smallest effective changes for each supported finding. Keep original assets and hrefs unless broken or inaccessible with no safe repair.
 - When adding CSS overrides for Tailwind-like classes that contain slash opacity, escape the slash in selectors and cover every used variant in transformed.html; examples include text-foreground/60 and bg-background/85.
 - If an issue is uncertain and changing it risks content loss or false claims, preserve the original and record the residual risk.
@@ -282,7 +292,7 @@ Available current files:
 ${fileList([
   join(runDir, "transformed.html"),
   join(iterDir, "checks.json"),
-  `${join(iterDir, "checks-full.json")} (targeted debugging only)`,
+  `${join(iterDir, "checks-full.json")} (targeted debugging only after citing a compact violation id/target)`,
   join(iterDir, "aggregate-feedback.json"),
   join(iterDir, "solver-task.md"),
   join(iterDir, "solver-result.json"),
@@ -353,7 +363,7 @@ ${fileList([
   `${join(runDir, "iterations")}/*/decision.json`,
   `${join(runDir, "transformed.html")} (targeted inspection only)`,
 ])}
-Prefer compact artifacts and inspect transformed.html only as needed for concrete report evidence.
+Prefer compact artifacts and the latest iteration by default; inspect transformed.html or older iterations only as needed for concrete report evidence.
 Outputs:
 - ${join(runDir, "report.md")}
 - ${join(runDir, "report.html")}
@@ -731,15 +741,23 @@ function contentType(file: string) {
   return (
     (
       {
+        ".avif": "image/avif",
         ".css": "text/css; charset=utf-8",
+        ".eot": "application/vnd.ms-fontobject",
         ".gif": "image/gif",
         ".html": "text/html; charset=utf-8",
+        ".ico": "image/x-icon",
         ".jpeg": "image/jpeg",
         ".jpg": "image/jpeg",
         ".js": "text/javascript; charset=utf-8",
         ".json": "application/json; charset=utf-8",
+        ".otf": "font/otf",
         ".png": "image/png",
         ".svg": "image/svg+xml",
+        ".ttf": "font/ttf",
+        ".webp": "image/webp",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
       } as Record<string, string>
     )[extname(file).toLowerCase()] || "application/octet-stream"
   );
