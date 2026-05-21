@@ -196,6 +196,15 @@ const scenarios = {
     model: "test-provider/model/family",
     variant: "nightly",
   },
+  "orchestrator-fixer-model-env": {
+    maxIterations: "1",
+    checks: [true],
+    decisions: ["accept"],
+    model: "flash-provider/flash-model",
+    variant: "max",
+    orchestratorModel: "pro-provider/pro-model",
+    fixerModel: "pro-provider/pro-model",
+  },
 };
 
 const scenario = scenarios[scenarioName];
@@ -251,6 +260,10 @@ try {
   process.env.SWARM_AGENT = scenario.agent || "test-agent";
   process.env.SWARM_MODEL = scenario.model || "fake-provider/fake-model";
   process.env.SWARM_VARIANT = scenario.variant || "test-variant";
+  if (scenario.orchestratorModel) process.env.SWARM_ORCHESTRATOR_MODEL = scenario.orchestratorModel;
+  else delete process.env.SWARM_ORCHESTRATOR_MODEL;
+  if (scenario.fixerModel) process.env.SWARM_FIXER_MODEL = scenario.fixerModel;
+  else delete process.env.SWARM_FIXER_MODEL;
 
   const profile = createProfile();
   let caught;

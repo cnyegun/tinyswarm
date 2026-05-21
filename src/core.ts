@@ -778,7 +778,7 @@ async function sessionFor(
     log(run, "session", "reuse", { key, id: harness.sessions[key] });
     return harness.sessions[key];
   }
-  const model = modelSpec();
+  const model = modelSpec(key);
   const agent = process.env.SWARM_AGENT || "build";
   const title = `swarm ${key} ${relative(run.rootDir, run.runDir)}`;
   const sessionStarted = Date.now();
@@ -863,7 +863,7 @@ async function promptAgent(
   text: string,
 ) {
   const sessionID = await sessionFor(harness, run, key);
-  const model = modelSpec();
+  const model = modelSpec(key);
   const agent = process.env.SWARM_AGENT || "build";
   const before = outputTimes(outputs);
   mkdirSync(dirname(promptFile), { recursive: true });
@@ -1178,15 +1178,16 @@ function listen(server: Server, port: number) {
 }
 
 /**
- * Parses the `SWARM_MODEL` environment variable into its constituent parts.
+ * Parses the model environment variable into its constituent parts.
  * Expected format: `<providerID>/<modelID>` (e.g. `"deepseek/deepseek-v4-flash"`).
  *
  * @returns Object with `providerID`, `modelID`, and `variant`.
  */
-function modelSpec() {
-  const [providerID, ...rest] = (
-    process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash"
-  ).split("/");
+function modelSpec(key?: string) {
+  let model = process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash";
+  if (key === "orchestrator") model = process.env.SWARM_ORCHESTRATOR_MODEL || model;
+  if (key === "fixer") model = process.env.SWARM_FIXER_MODEL || model;
+  const [providerID, ...rest] = model.split("/");
   return {
     providerID,
     modelID: rest.join("/"),
