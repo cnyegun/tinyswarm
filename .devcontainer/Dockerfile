@@ -12,7 +12,9 @@ RUN apt-get update && apt-get install -y \
     && apt-get update && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://opencode.ai/install | bash
+RUN curl -fsSL https://opencode.ai/install | bash && \
+    cp /root/.opencode/bin/opencode /usr/local/bin/opencode && \
+    chmod +x /usr/local/bin/opencode
 
 
 RUN useradd -m -s /bin/bash -u 1000 devuser && \
