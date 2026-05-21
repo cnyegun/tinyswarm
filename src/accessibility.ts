@@ -211,16 +211,25 @@ Build a score-driven priority order:
 - Semantic and usability findings need evidence and confidence. Do not let a low-confidence hallucinated finding drive destructive changes.
 - If the current transformed.html is worse than the source evidence because it dropped content or became a generic landing page, instruct the fixer to restore affected sections from targeted original snippets, then remediate narrowly.
 
-solver-task.md should tell the fixer exactly what to change and what not to change. Include these sections:
+solver-task.md should be an outcome-based work order, not a patch recipe. The orchestrator acts as a manager: define the problem, priority, evidence, user impact, preservation boundaries, policy decisions, and acceptance criteria. The fixer owns implementation strategy and may make any local HTML/CSS/JS/asset-reference changes needed to satisfy accessibility checks while preserving the page.
+
+Do not micromanage implementation tactics in solver-task.md:
+- Do not limit the fixer to a fixed number of changes when violations remain.
+- Do not require exact CSS blocks, exact selector edits, wrapper structures, or DOM mechanics unless a specific target is cited as evidence.
+- Do not prescribe clipping or scrolling tactics such as overflow-x:hidden or overflow:auto as a reflow fix. If scrolling is an intentional accessible design choice, state the accessibility requirements instead: keyboard access, focusability, accessible name, and no hidden content.
+- Do not say no structural changes when fixing the issue may require responsive layout, landmark, control, or embed restructuring.
+- Do not claim third-party violations are residual risks while also requiring zero axe violations. Choose and state the policy: either preserve with explicit residual risk, or allow the fixer to replace the third-party embed/widget with an accessible fallback that preserves equivalent user access.
+
+Include these sections:
 - Objective: faithful accessibility remediation of the original page, not a generic replacement.
 - Source of truth: compact source evidence, targeted original/transformed snippets, brief.md, and this aggregate feedback.
 - Preservation requirements: preserve original brand feel, section order, substantive copy, CTAs, link destinations/text meaning, images/logos unless decorative, schedule details, judging criteria, partner/sponsor information, and any distinctive visual language unless accessibility requires a targeted adjustment.
-- Allowed removals: only the Lovable badge, purely decorative duplicated content, empty wrappers, or duplicate inaccessible controls when an accessible equivalent remains. Require a short justification for each removal.
+- Allowed removals/replacements: avoid removing substantive content to make checks pass. Allow removal of the Lovable badge, decorative duplicates, empty wrappers, duplicate inaccessible controls when an accessible equivalent remains, and third-party widgets/embeds only when replaced with equivalent accessible content or links. Require a short justification for each removal or replacement.
 - Must-fix accessibility items: list each supported issue with evidence ids or short evidence, affected element/section, user impact, and acceptance criteria.
-- Faithful remediation constraints: prefer semantic HTML, corrected names/labels/alt text, contrast/focus/reflow CSS, and small structural repairs over wholesale redesign. Do not replace the page with a generic hero/features/testimonials/contact template. Do not rewrite CTAs into vague labels. Do not drop links or images to make axe pass.
+- Faithful remediation constraints: prefer semantic HTML, corrected names/labels/alt text, contrast/focus/reflow CSS, and focused structural repairs over wholesale redesign. Do not replace the page with a generic hero/features/testimonials/contact template. Do not rewrite CTAs into vague labels. Do not drop links or images to make axe pass unless an equivalent accessible replacement is provided and justified.
 - Color/theme repair guardrail: treat background, foreground, muted, accent, link, and CTA/button colors as a paired system. If a task changes dark/light background utilities, also require matching foreground utilities, slash-opacity variants, bg-background opacity variants, body background, and default anchor/CTA colors so computed contrast passes. Do not accept token-name fixes without computed foreground/background contrast evidence.
 - Acceptance criteria: valid standalone HTML, title, exactly one h1, main landmark, no axe violations, no mobile horizontal overflow, visible focus styles, responsive layout, improved accessibility score, preserved key content and identity, no unsupported removals.
-- Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, preservationNotes, removedContent, and residualRisks if useful, while remaining simple compact JSON.
+- Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, implementation decisions, deviations from solver-task tactics if any, preservationNotes, removedContent/replacements, and residualRisks if useful, while remaining simple compact JSON.
 
 ${COMPACT_OUTPUT}
 
@@ -244,7 +253,7 @@ ${fileList([
   join(iterDir, "aggregate-feedback.json"),
   join(iterDir, "solver-task.md"),
 ])}
-Inspect only the source snippets needed to preserve and repair the page. The fixer is the only role allowed to load/copy original.html wholesale, and only once as the implementation base when no faithful transformed.html exists; never copy raw HTML into notes or summaries.`
+Inspect only the source snippets needed to preserve and repair the page. The fixer is the only role allowed to load/copy original.html wholesale, and only once as the implementation base when no faithful transformed.html exists. If transformed.html does not exist, do not build it from scratch: run cp from original.html to transformed.html first, then edit transformed.html in place to save tokens and preserve the page. never copy raw HTML into notes or summaries.`
     : `Use unchanged source evidence already in this fixer session; do not re-load unchanged source artifacts wholesale.
 Available current files:
 ${fileList([
@@ -260,11 +269,17 @@ Outputs:
 
 Hard constraints:
 - Produce valid standalone HTML in transformed.html.
-- Keep the original page purpose, brand feel, visual tone, section order, substantive copy, CTAs, links, images/logos, schedule details, judging criteria, partner/sponsor information, and other user-relevant details unless solver-task.md identifies an accessibility reason to change them.
+- Keep the original page purpose, brand feel, visual tone, section order, substantive copy, CTAs, links, images/logos, schedule details, judging criteria, partner/sponsor information, and other user-relevant details unless an accessibility fix requires a targeted change.
 - Do not create a generic hero/features/testimonials/contact page. Do not replace specific event or organization content with vague marketing filler. Do not invent new dates, sponsors, judging criteria, links, or claims.
-- Only remove the Lovable badge, purely decorative duplicated content, empty wrappers, or duplicate inaccessible controls when an accessible equivalent remains and the removal is justified in solver-result.json.
+- Do not remove substantive content solely to make checks pass. You may remove or replace decorative duplicates, empty wrappers, duplicate inaccessible controls, or inaccessible third-party widgets/embeds when an accessible equivalent remains and the decision is justified in solver-result.json.
 - Passing axe is required but not sufficient. Also preserve content and improve human accessibility.
 - Color fixes must repair the whole computed color system, not a single class. If restoring or changing backgrounds, also verify and fix body/html background, text-foreground, text-foreground slash-opacity variants, text-muted-foreground, accent text, bg-background slash-opacity variants, default anchors, and CTA/button foreground/background colors.
+
+Implementation authority:
+- You own the implementation strategy. Treat solver-task.md as goals, evidence, constraints, policy, and acceptance criteria; do not treat any tactical suggestion as mandatory if it conflicts with accessibility, preservation, or the automated checks.
+- You may make whatever local HTML, CSS, JS, ARIA, landmark, responsive layout, embed/widget, or asset-reference changes are needed to fix supported violations and avoid regressions.
+- If solver-task.md is too narrow, contradictory, or suggests a tactic that would create a new violation, choose the better implementation and explain the deviation in solver-result.json.
+- Fix root causes, not symptoms. Do not hide overflow, clip content, add inaccessible scroll wrappers, remove focusability, or drop content merely to silence a checker.
 
 Required accessibility baseline:
 - Meaningful title, page language when known, exactly one h1, main landmark, sensible landmarks/sections, logical heading hierarchy, and DOM order matching visual/reading order.
@@ -274,8 +289,8 @@ Required accessibility baseline:
 - Use native HTML before ARIA. If ARIA is needed, follow WAI-ARIA Authoring Practices for roles, states, properties, names, keyboard behavior, and landmarks.
 
 Implementation guidance:
-- Start from the best prior transformed.html when it preserved the original well. If no faithful transformed.html exists, or prior output became generic or lost content, use original.html once as the implementation base or rebuild from targeted original sections, then apply narrow fixes.
-- Make the smallest effective changes for each supported finding. Keep original assets and hrefs unless broken or inaccessible with no safe repair.
+- Start from the best prior transformed.html when it preserved the original well. If transformed.html does not exist, copy original.html to transformed.html with cp, then edit transformed.html in place. If a prior transformed.html exists but became generic or lost content, restore from original.html with targeted copies or by replacing transformed.html from original.html once, then apply narrow fixes. Do not build transformed.html from scratch.
+- Make the smallest effective set of changes that actually clears supported violations and preserves the page. Keep original assets and hrefs unless broken, inaccessible, or replaced with an equivalent accessible fallback.
 - When adding CSS overrides for Tailwind-like classes that contain slash opacity, escape the slash in selectors and cover every used variant in transformed.html; examples include text-foreground/60 and bg-background/85.
 - If an issue is uncertain and changing it risks content loss or false claims, preserve the original and record the residual risk.
 - Ensure transformed.html can be served directly from the run directory without external build steps.
@@ -501,8 +516,12 @@ async function check(
     });
     const page = await context.newPage();
     await page.goto(`http://localhost:${preview.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
     });
+    await page
+      .waitForLoadState("networkidle", { timeout: 3000 })
+      .catch(() => undefined);
     dom = await page.evaluate(() => ({
       title: document.title.trim(),
       h1: document.querySelectorAll("h1").length,
@@ -525,8 +544,12 @@ async function check(
     });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`http://localhost:${preview.port}/`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
     });
+    await page
+      .waitForLoadState("networkidle", { timeout: 3000 })
+      .catch(() => undefined);
     mobileOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,
     );
