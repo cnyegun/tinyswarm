@@ -359,12 +359,18 @@ function prepareRun(
     started: Date.now(),
   };
   const model = modelSpec();
+  const orchestratorModel = modelSpec("orchestrator");
+  const fixerModel = modelSpec("fixer");
 
   console.log(`Run: ${shown(rootDir, runDir)}`);
   console.log(`Log: ${shown(rootDir, run.logFile)}`);
   console.log(
     `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
   );
+  if (modelName(orchestratorModel) !== modelName(model))
+    console.log(`Orchestrator model: ${modelName(orchestratorModel)} (variant=${orchestratorModel.variant})`);
+  if (modelName(fixerModel) !== modelName(model))
+    console.log(`Fixer model: ${modelName(fixerModel)} (variant=${fixerModel.variant})`);
 
   log(run, "run", "starting", {
     profile: profile.id,
@@ -375,6 +381,8 @@ function prepareRun(
     agent: process.env.SWARM_AGENT || "build",
     model: modelName(model),
     variant: model.variant,
+    orchestratorModel: modelName(orchestratorModel),
+    fixerModel: modelName(fixerModel),
     timeoutMs: Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000),
     pid: process.pid,
     node: process.version,
@@ -1178,7 +1186,8 @@ function listen(server: Server, port: number) {
 }
 
 /**
- * Parses the model environment variable into its constituent parts.
+ * Parses `SWARM_MODEL` into its constituent parts.
+ * `SWARM_ORCHESTRATOR_MODEL` and `SWARM_FIXER_MODEL` override it for those sessions.
  * Expected format: `<providerID>/<modelID>` (e.g. `"deepseek/deepseek-v4-flash"`).
  *
  * @returns Object with `providerID`, `modelID`, and `variant`.
