@@ -8,7 +8,9 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "test:core": "npm run build && node --test test/core.test.mjs",
     "swarm": "npm run build && node dist/index.js",
+    "swarm:tui": "npm run build && cargo run --quiet --manifest-path tui/Cargo.toml --",
     "tiny": "npm run build && node dist/index.js",
+    "test:tui": "cargo test --manifest-path tui/Cargo.toml",
     "test:mock": "npm run build && node test/mock-harness.mjs"
   },
   "dependencies": {

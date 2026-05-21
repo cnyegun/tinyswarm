@@ -14,6 +14,19 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import {
+  axeViolationCount,
+  consoleReporter,
+  emit as emitReporter,
+  line as lineReporter,
+  progress as progressReporter,
+  promptOutputEvent,
+  type RunSwarmOptions,
+  type SwarmEvent,
+  type SwarmReporter,
+} from "./reporter.js";
+
+export type { RunSwarmOptions, SwarmEvent, SwarmReporter } from "./reporter.js";
 
 /**
  * Identifies a reviewer agent participating in the swarm evaluation loop.
@@ -218,6 +231,8 @@ type RunState = RunPaths & {
   logFile: string;
   /** Epoch ms when this run started; used for `+Nms` log offsets. */
   started: number;
+  /** Presentation hooks for plain CLI output or structured TUI events. */
+  reporter: SwarmReporter;
   /** Live harness for this run, if initialized. */
   harness?: AgentHarness;
 };
@@ -291,8 +306,9 @@ export async function runSwarm(
   profile: SwarmProfile,
   input: string,
   rootDir: string,
+  options: RunSwarmOptions = {},
 ) {
-  const run = prepareRun(profile, input, rootDir);
+  const run = prepareRun(profile, input, rootDir, options.reporter);
 
   try {
     // Keep runSwarm as the table of contents: source capture, agent loop,
@@ -315,14 +331,27 @@ export async function runSwarm(
       artifact: fileState(run.rootDir, join(run.runDir, run.profile.artifact)),
       report: fileState(run.rootDir, join(run.runDir, "report.html")),
     });
-    console.log(`Run: ${shown(run.rootDir, run.runDir)}`);
-    console.log(`Brief: ${shown(run.rootDir, join(run.runDir, "brief.md"))}`);
-    console.log(`Report: ${shown(run.rootDir, join(run.runDir, "report.html"))}`);
-    console.log(
+    emit(run, {
+      type: "run_complete",
+      decision: lastDecision,
+      runDir: shown(run.rootDir, run.runDir),
+      artifact: shown(run.rootDir, join(run.runDir, run.profile.artifact)),
+      report: shown(run.rootDir, join(run.runDir, "report.html")),
+      logFile: shown(run.rootDir, run.logFile),
+      localUrl: `http://localhost:${served.port}`,
+    });
+    line(run, `Run: ${shown(run.rootDir, run.runDir)}`);
+    line(run, `Brief: ${shown(run.rootDir, join(run.runDir, "brief.md"))}`);
+    line(run, `Report: ${shown(run.rootDir, join(run.runDir, "report.html"))}`);
+    line(
+      run,
       `Transformed: ${shown(run.rootDir, join(run.runDir, run.profile.artifact))}`,
     );
-    console.log(`Log: ${shown(run.rootDir, run.logFile)}`);
-    console.log(`Local: http://localhost:${served.port}`);
+    line(run, `Log: ${shown(run.rootDir, run.logFile)}`);
+    line(run, `Local: http://localhost:${served.port}`);
+  } catch (error) {
+    emit(run, { type: "error", message: describe(error) });
+    throw error;
   } finally {
     closeHarness(run);
   }
@@ -338,6 +367,7 @@ function prepareRun(
   profile: SwarmProfile,
   input: string,
   rootDir: string,
+  reporter: SwarmReporter = consoleReporter,
 ): RunState {
   const maxIterations = Math.max(
     1,
@@ -357,14 +387,33 @@ function prepareRun(
     maxIterations,
     logFile: join(runDir, "swarm.log"),
     started: Date.now(),
+    reporter,
   };
   const model = modelSpec();
 
-  console.log(`Run: ${shown(rootDir, runDir)}`);
-  console.log(`Log: ${shown(rootDir, run.logFile)}`);
-  console.log(
+  line(run, `Run: ${shown(rootDir, runDir)}`);
+  line(run, `Log: ${shown(rootDir, run.logFile)}`);
+  line(
+    run,
     `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
   );
+
+  emit(run, {
+    type: "run_start",
+    profile: profile.id,
+    input,
+    rootDir,
+    runDir: shown(rootDir, runDir),
+    runDirAbsolute: runDir,
+    logFile: shown(rootDir, run.logFile),
+    logFileAbsolute: run.logFile,
+    artifact: profile.artifact,
+    reviewers: profile.reviewers,
+    maxIterations,
+    agent: process.env.SWARM_AGENT || "build",
+    model: modelName(model),
+    variant: model.variant,
+  });
 
   log(run, "run", "starting", {
     profile: profile.id,
@@ -394,7 +443,8 @@ async function runScan(run: RunState) {
   const { profile, input, rootDir, runDir } = run;
   const scanStarted = Date.now();
   log(run, "scan", "starting", { profile: profile.id, input });
-  progress("scan", `start url=${input}`);
+  emit(run, { type: "phase", phase: "scan", status: "start", input });
+  progress(run, "scan", `start url=${input}`);
   try {
     await profile.scan(input, run);
     const scanArtifacts = [
@@ -404,6 +454,7 @@ async function runScan(run: RunState) {
       join("screenshots", "original.png"),
     ];
     progress(
+      run,
       "scan",
       `done ${duration(scanStarted)} ${artifactSummary(
         rootDir,
@@ -416,9 +467,21 @@ async function runScan(run: RunState) {
         fileState(rootDir, join(runDir, path)),
       ),
     });
+    emit(run, {
+      type: "phase",
+      phase: "scan",
+      status: "completed",
+      artifacts: scanArtifacts.map((path) => fileState(rootDir, join(runDir, path))),
+    });
   } catch (error) {
     log(run, "scan", "failed", {
       elapsedMs: Date.now() - scanStarted,
+      error: describe(error),
+    });
+    emit(run, {
+      type: "phase",
+      phase: "scan",
+      status: "failed",
       error: describe(error),
     });
     throw error;
@@ -465,7 +528,14 @@ function prepareIteration(run: RunState, iteration: number): IterationPaths {
     iteration,
     iterDir: shown(run.rootDir, iterDir),
   });
-  progress(`iteration ${iteration}/${run.maxIterations}`, "start");
+  emit(run, {
+    type: "iteration",
+    iteration,
+    maxIterations: run.maxIterations,
+    status: "active",
+    iterDir: shown(run.rootDir, iterDir),
+  });
+  progress(run, `iteration ${iteration}/${run.maxIterations}`, "start");
   return iter;
 }
 
@@ -510,7 +580,15 @@ async function runIteration(
   );
   await runChecks(run, iter);
   await collectVotes(run, harness, iter);
-  return decideIteration(run, harness, iter);
+  const decision = await decideIteration(run, harness, iter);
+  emit(run, {
+    type: "iteration",
+    iteration,
+    maxIterations: run.maxIterations,
+    status: "completed",
+    outcome: decision.outcome,
+  });
+  return decision;
 }
 
 /**
@@ -548,7 +626,8 @@ async function collectFindings(
 async function runChecks(run: RunState, iter: IterationPaths) {
   const checkStarted = Date.now();
   log(run, "check", "start", { iteration: iter.iteration });
-  progress("check", `start iteration=${iter.iteration}`);
+  emit(run, { type: "check", iteration: iter.iteration, status: "start" });
+  progress(run, "check", `start iteration=${iter.iteration}`);
   let checks: CheckResult;
   try {
     checks = await run.profile.check(run, iter.iteration);
@@ -556,6 +635,12 @@ async function runChecks(run: RunState, iter: IterationPaths) {
     log(run, "check", "failed", {
       iteration: iter.iteration,
       elapsedMs: Date.now() - checkStarted,
+      error: describe(error),
+    });
+    emit(run, {
+      type: "check",
+      iteration: iter.iteration,
+      status: "failed",
       error: describe(error),
     });
     throw error;
@@ -568,14 +653,25 @@ async function runChecks(run: RunState, iter: IterationPaths) {
     failures: checks.failures.length,
     output: fileState(run.rootDir, checksFile),
   });
+  emit(run, {
+    type: "check",
+    iteration: iter.iteration,
+    status: checks.passed ? "passed" : "failed",
+    passed: checks.passed,
+    failures: checks.failures.length,
+    axeViolations: axeViolationCount(checks),
+    output: fileState(run.rootDir, checksFile),
+  });
   progress(
+    run,
     "check",
     `${checks.passed ? "passed" : "failed"} ${duration(checkStarted)} failures=${checks.failures.length}`,
   );
   for (const failure of checks.failures.slice(0, 3))
-    progress("check", `failure: ${failure}`);
+    progress(run, "check", `failure: ${failure}`);
   if (checks.failures.length > 3)
     progress(
+      run,
       "check",
       `...${checks.failures.length - 3} more failures in checks.json`,
     );
@@ -642,7 +738,17 @@ async function decideIteration(
     writeFileSync(decisionFile, JSON.stringify(decision, null, 2));
   }
   log(run, "decision", decision.outcome, decision);
+  emit(run, {
+    type: "decision",
+    iteration: iter.iteration,
+    outcome: decision.outcome,
+    reason: decision.reason,
+    checksPass: decision.checksPass,
+    accepts: decision.accepts,
+    blocks: decision.blocks,
+  });
   progress(
+    run,
     "decision",
     `outcome=${decision.outcome} checksPass=${decision.checksPass} accepts=${decision.accepts} blocks=${decision.blocks} reason=${quote(decision.reason)}`,
   );
@@ -869,7 +975,18 @@ async function promptAgent(
   mkdirSync(dirname(promptFile), { recursive: true });
   writeFileSync(promptFile, text);
   const promptStarted = Date.now();
+  emit(run, {
+    type: "prompt",
+    phase,
+    agent: key,
+    status: "start",
+    sessionID: shortID(sessionID),
+    promptFile: shown(run.rootDir, promptFile),
+    promptBytes: Buffer.byteLength(text, "utf8"),
+    outputs: outputs.map((path) => shown(run.rootDir, path)),
+  });
   progress(
+    run,
     phase,
     `${key} session=${shortID(sessionID)} outputs=${outputs.map(outputName).join(",")} prompt=${formatBytes(Buffer.byteLength(text, "utf8"))}`,
   );
@@ -900,6 +1017,14 @@ async function promptAgent(
         elapsedMs: Date.now() - promptStarted,
         error: describe(error),
       });
+      emit(run, {
+        type: "prompt",
+        phase,
+        agent: key,
+        status: "failed",
+        sessionID: shortID(sessionID),
+        error: describe(error),
+      });
       throw error;
     });
   if (result.error) {
@@ -907,6 +1032,14 @@ async function promptAgent(
       key,
       sessionID,
       elapsedMs: Date.now() - promptStarted,
+      error: describe(result.error),
+    });
+    emit(run, {
+      type: "prompt",
+      phase,
+      agent: key,
+      status: "failed",
+      sessionID: shortID(sessionID),
       error: describe(result.error),
     });
     throw new Error(
@@ -919,7 +1052,14 @@ async function promptAgent(
     elapsedMs: Date.now() - promptStarted,
     response: summarizeData(result.data),
   });
-  progress(phase, `${key} accepted in ${duration(promptStarted)}`);
+  emit(run, {
+    type: "prompt",
+    phase,
+    agent: key,
+    status: "accepted",
+    sessionID: shortID(sessionID),
+  });
+  progress(run, phase, `${key} accepted in ${duration(promptStarted)}`);
   const finalOutputs = await waitForOutputs(run, outputs, before, {
     key,
     phase,
@@ -931,7 +1071,18 @@ async function promptAgent(
     elapsedMs: Date.now() - promptStarted,
     outputs: finalOutputs,
   });
+  emit(run, {
+    type: "prompt",
+    phase,
+    agent: key,
+    status: "done",
+    sessionID: shortID(sessionID),
+    outputs: finalOutputs,
+  });
+  const outputEvent = promptOutputEvent(key, phase, outputs);
+  if (outputEvent) emit(run, outputEvent);
   progress(
+    run,
     phase,
     `${key} done ${duration(promptStarted)} ${formatStates(finalOutputs)}`,
   );
@@ -1037,6 +1188,7 @@ async function waitForOutputs(
         outputs: states,
       });
       progress(
+        run,
         details.phase,
         `${details.key} ${waitSummary(states, startedAt)}`,
       );
@@ -1142,6 +1294,7 @@ async function serve(run: RunState, artifact: string, preferredPort = 5177) {
       e.code === "EADDRINUSE" ? listen(server, 0) : Promise.reject(e),
   );
   log(run, "serve", "listening", { port });
+  emit(run, { type: "serve", port, localUrl: `http://localhost:${port}` });
   return { server, port };
 }
 
@@ -1217,14 +1370,23 @@ function log(run: RunState, step: string, message: string, data?: unknown) {
   appendFileSync(run.logFile, line);
 }
 
+function line(run: RunState, text: string) {
+  lineReporter(run.reporter, text);
+}
+
+function emit(run: RunState, event: SwarmEvent) {
+  emitReporter(run.reporter, run.started, event);
+}
+
 /**
  * Prints a bracketed progress line to stdout for real-time operator visibility.
  *
+ * @param run - Current run state with presentation hooks.
  * @param phase - Current workflow phase (e.g. `"scan"`, `"check"`, `"iteration 2/3"`).
  * @param message - Event detail appended after the phase label.
  */
-function progress(phase: string, message: string) {
-  console.log(`[${phase}] ${message}`);
+function progress(run: RunState, phase: string, message: string) {
+  progressReporter(run.reporter, run.started, phase, message);
 }
 
 /**

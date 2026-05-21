@@ -85,6 +85,7 @@ dist
 
 # tiny-rewrite run artifacts
 runs/
+tui/target/
 
 # Gatsby files
 .cache/

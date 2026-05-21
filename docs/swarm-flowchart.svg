@@ -1,0 +1,250 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1060" viewBox="0 0 1800 1060" role="img" aria-labelledby="title desc">
+<title id="title">Autonomous Accessibility Remediation System Flowchart</title>
+<desc id="desc">Minimal scientific flowchart showing the scan, multi-agent review, fixer, deterministic validation, reviewer vote, decision, report, and iteration loop.</desc>
+<defs>
+  <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+    <path d="M 0 0 L 12 6 L 0 12 z" fill="#475467"/>
+  </marker>
+  <style>
+    text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace; letter-spacing: 0.01em; }
+  </style>
+</defs>
+
+<rect width="1800" height="1060" fill="#f3f6fa"/>
+<rect x="56" y="48" width="1688" height="964" rx="28" fill="#ffffff" stroke="#d9e0ea" stroke-width="2"/>
+
+<text x="900" y="105" text-anchor="middle" font-size="42" font-weight="800" fill="#172033">Autonomous Accessibility Remediation System</text>
+<text x="900" y="141" text-anchor="middle" font-size="20" font-weight="450" fill="#667085">A closed-loop multi-agent pipeline: audit → repair → validate → vote → report</text>
+
+
+<g>
+  <rect x="108" y="190" width="1584" height="170" rx="18" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="134" y="226" text-anchor="start" font-size="16" font-weight="800" fill="#667085" class="mono">INPUT + EVIDENCE COLLECTION</text>
+</g>
+
+<g>
+  <rect x="108" y="406" width="1584" height="220" rx="18" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="134" y="442" text-anchor="start" font-size="16" font-weight="800" fill="#667085" class="mono">AGENTIC REASONING + REPAIR</text>
+</g>
+
+<g>
+  <rect x="108" y="672" width="1584" height="210" rx="18" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="134" y="708" text-anchor="start" font-size="16" font-weight="800" fill="#667085" class="mono">DETERMINISTIC VALIDATION + GOVERNANCE</text>
+</g>
+
+
+<g>
+  <rect x="150" y="235" width="260" height="104" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="184" cy="269" r="18" fill="#f4f7fb" stroke="#175cd3" stroke-width="1.8"/>
+  <text x="184" y="276" text-anchor="middle" font-size="16" font-weight="700" fill="#175cd3">1</text>
+  <text x="292" y="276" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Scan</text>
+  <line x1="174" y1="297" x2="386" y2="297" stroke="#edf1f7" stroke-width="2"/>
+  <text x="280" y="326" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Fetch URL</text>
+<text x="280" y="348" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Save original.html</text>
+<text x="280" y="370" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Extract facts + axe</text>
+</g>
+
+<g>
+  <rect x="505" y="235" width="300" height="104" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="539" cy="269" r="18" fill="#f4f7fb" stroke="#175cd3" stroke-width="1.8"/>
+  <text x="539" y="276" text-anchor="middle" font-size="16" font-weight="700" fill="#175cd3">2</text>
+  <text x="667" y="276" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Brief</text>
+  <line x1="529" y1="297" x2="781" y2="297" stroke="#edf1f7" stroke-width="2"/>
+  <text x="655" y="326" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Preservation inventory</text>
+<text x="655" y="348" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Initial risk model</text>
+<text x="655" y="370" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Reviewer scopes</text>
+</g>
+
+<g>
+  <rect x="900" y="235" width="350" height="104" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="934" cy="269" r="18" fill="#f4f7fb" stroke="#175cd3" stroke-width="1.8"/>
+  <text x="934" y="276" text-anchor="middle" font-size="16" font-weight="700" fill="#175cd3">3</text>
+  <text x="1087" y="276" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Source Evidence</text>
+  <line x1="924" y1="297" x2="1226" y2="297" stroke="#edf1f7" stroke-width="2"/>
+  <text x="1075" y="326" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">facts.json</text>
+<text x="1075" y="348" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">axe.json / axe-full.json</text>
+<text x="1075" y="370" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">screenshot + original DOM</text>
+</g>
+
+
+<g>
+  <rect x="150" y="462" width="320" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="184" cy="496" r="18" fill="#f4f7fb" stroke="#475467" stroke-width="1.8"/>
+  <text x="184" y="503" text-anchor="middle" font-size="16" font-weight="700" fill="#475467">4</text>
+  <text x="322" y="503" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Specialist Review</text>
+  <line x1="174" y1="524" x2="446" y2="524" stroke="#edf1f7" stroke-width="2"/>
+  <text x="310" y="553" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Semantic</text>
+<text x="310" y="575" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Keyboard</text>
+<text x="310" y="597" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Cognitive</text>
+<text x="310" y="619" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Visual</text>
+</g>
+
+<g>
+  <rect x="565" y="462" width="320" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="599" cy="496" r="18" fill="#f4f7fb" stroke="#475467" stroke-width="1.8"/>
+  <text x="599" y="503" text-anchor="middle" font-size="16" font-weight="700" fill="#475467">5</text>
+  <text x="737" y="503" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Aggregate</text>
+  <line x1="589" y1="524" x2="861" y2="524" stroke="#edf1f7" stroke-width="2"/>
+  <text x="725" y="553" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Normalize findings</text>
+<text x="725" y="575" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Deduplicate</text>
+<text x="725" y="597" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Write solver-task.md</text>
+</g>
+
+<g>
+  <rect x="980" y="462" width="340" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="1014" cy="496" r="18" fill="#f4f7fb" stroke="#9a3412" stroke-width="1.8"/>
+  <text x="1014" y="503" text-anchor="middle" font-size="16" font-weight="700" fill="#9a3412">6</text>
+  <text x="1162" y="503" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Fixer</text>
+  <line x1="1004" y1="524" x2="1296" y2="524" stroke="#edf1f7" stroke-width="2"/>
+  <text x="1150" y="553" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">cp original → transformed</text>
+<text x="1150" y="575" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Edit in place</text>
+<text x="1150" y="597" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Write solver-result.json</text>
+</g>
+
+<g>
+  <rect x="1405" y="462" width="230" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="1439" cy="496" r="18" fill="#f4f7fb" stroke="#9a3412" stroke-width="1.8"/>
+  <text x="1439" y="503" text-anchor="middle" font-size="16" font-weight="700" fill="#9a3412">7</text>
+  <text x="1532" y="503" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Artifact</text>
+  <line x1="1429" y1="524" x2="1611" y2="524" stroke="#edf1f7" stroke-width="2"/>
+  <text x="1520" y="553" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">transformed.html</text>
+<text x="1520" y="575" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Standalone page</text>
+<text x="1520" y="597" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Brand preserved</text>
+</g>
+
+
+<g>
+  <rect x="190" y="728" width="310" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="224" cy="762" r="18" fill="#f4f7fb" stroke="#067647" stroke-width="1.8"/>
+  <text x="224" y="769" text-anchor="middle" font-size="16" font-weight="700" fill="#067647">8</text>
+  <text x="357" y="769" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Checks</text>
+  <line x1="214" y1="790" x2="476" y2="790" stroke="#edf1f7" stroke-width="2"/>
+  <text x="345" y="819" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Axe</text>
+<text x="345" y="841" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">h1 + main</text>
+<text x="345" y="863" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Mobile overflow</text>
+</g>
+
+<g>
+  <rect x="585" y="728" width="310" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="619" cy="762" r="18" fill="#f4f7fb" stroke="#475467" stroke-width="1.8"/>
+  <text x="619" y="769" text-anchor="middle" font-size="16" font-weight="700" fill="#475467">9</text>
+  <text x="752" y="769" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Reviewer Vote</text>
+  <line x1="609" y1="790" x2="871" y2="790" stroke="#edf1f7" stroke-width="2"/>
+  <text x="740" y="819" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Accept / revise</text>
+<text x="740" y="841" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Blockers</text>
+<text x="740" y="863" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Quality score</text>
+</g>
+
+<g>
+  <rect x="980" y="728" width="310" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="1014" cy="762" r="18" fill="#f4f7fb" stroke="#475467" stroke-width="1.8"/>
+  <text x="1014" y="769" text-anchor="middle" font-size="16" font-weight="700" fill="#475467">10</text>
+  <text x="1147" y="769" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Decision</text>
+  <line x1="1004" y1="790" x2="1266" y2="790" stroke="#edf1f7" stroke-width="2"/>
+  <text x="1135" y="819" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Accept</text>
+<text x="1135" y="841" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Continue</text>
+<text x="1135" y="863" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Stop with risks</text>
+</g>
+
+<g>
+  <rect x="1375" y="728" width="260" height="126" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="2"/>
+  <circle cx="1409" cy="762" r="18" fill="#f4f7fb" stroke="#175cd3" stroke-width="1.8"/>
+  <text x="1409" y="769" text-anchor="middle" font-size="16" font-weight="700" fill="#175cd3">11</text>
+  <text x="1517" y="769" text-anchor="middle" font-size="23" font-weight="700" fill="#172033">Report</text>
+  <line x1="1399" y1="790" x2="1611" y2="790" stroke="#edf1f7" stroke-width="2"/>
+  <text x="1505" y="819" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Before / after</text>
+<text x="1505" y="841" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Evidence trail</text>
+<text x="1505" y="863" text-anchor="middle" font-size="17" font-weight="450" fill="#5a6475">Residual risks</text>
+</g>
+
+
+<g>
+  <line x1="410" y1="287" x2="505" y2="287" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <line x1="805" y1="287" x2="900" y2="287" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <line x1="1075" y1="339" x2="310" y2="462" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+  <rect x="610" y="382" width="164" height="28" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="692" y="402" text-anchor="middle" font-size="13" font-weight="700" fill="#475467" class="mono">context</text>
+</g>
+
+<g>
+  <line x1="470" y1="525" x2="565" y2="525" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <line x1="885" y1="525" x2="980" y2="525" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <line x1="1320" y1="525" x2="1405" y2="525" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <line x1="1520" y1="588" x2="345" y2="728" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+  <rect x="850" y="640" width="164" height="28" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="932" y="660" text-anchor="middle" font-size="13" font-weight="700" fill="#475467" class="mono">artifact</text>
+</g>
+
+<g>
+  <line x1="500" y1="791" x2="585" y2="791" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <line x1="895" y1="791" x2="980" y2="791" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <line x1="1290" y1="791" x2="1375" y2="791" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" />
+
+</g>
+
+<g>
+  <path d="M 1065 728 C 1045 650 990 628 910 618 C 730 596 600 620 515 680 C 455 723 420 724 400 728" fill="none" stroke="#475467" stroke-width="2.5" marker-end="url(#arrow)" stroke-dasharray="8 8"/>
+  <rect x="674" y="630" width="156" height="28" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="752" y="650" text-anchor="middle" font-size="13" font-weight="700" fill="#475467" class="mono">revise loop</text>
+</g>
+
+<line x1="120" y1="918" x2="1680" y2="918" stroke="#e2e8f0" stroke-width="2"/>
+<text x="150" y="955" text-anchor="start" font-size="15" font-weight="800" fill="#667085" class="mono">Observed runtime profile from logs</text>
+
+<g>
+  <rect x="410" y="938" width="250" height="76" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="1.5"/>
+  <text x="535" y="972" text-anchor="middle" font-size="24" font-weight="800" fill="#172033" class="mono">170s</text>
+  <text x="535" y="996" text-anchor="middle" font-size="13" font-weight="650" fill="#667085" class="mono">reviewer findings</text>
+</g>
+
+<g>
+  <rect x="690" y="938" width="250" height="76" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="1.5"/>
+  <text x="815" y="972" text-anchor="middle" font-size="24" font-weight="800" fill="#172033" class="mono">50s</text>
+  <text x="815" y="996" text-anchor="middle" font-size="13" font-weight="650" fill="#667085" class="mono">fixer</text>
+</g>
+
+<g>
+  <rect x="970" y="938" width="250" height="76" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="1.5"/>
+  <text x="1095" y="972" text-anchor="middle" font-size="24" font-weight="800" fill="#172033" class="mono">1.4s</text>
+  <text x="1095" y="996" text-anchor="middle" font-size="13" font-weight="650" fill="#667085" class="mono">axe/checks</text>
+</g>
+
+<g>
+  <rect x="1250" y="938" width="250" height="76" rx="12" fill="#ffffff" stroke="#cfd6e3" stroke-width="1.5"/>
+  <text x="1375" y="972" text-anchor="middle" font-size="24" font-weight="800" fill="#172033" class="mono">389s</text>
+  <text x="1375" y="996" text-anchor="middle" font-size="13" font-weight="650" fill="#667085" class="mono">total run</text>
+</g>
+
+<text x="900" y="1000" text-anchor="middle" font-size="18" font-weight="600" fill="#475467">Key claim: stochastic agents propose and repair; deterministic checks gate every fixer turn.</text>
+</svg>
