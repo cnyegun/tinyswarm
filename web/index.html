@@ -365,6 +365,55 @@
         gap: var(--space-2) var(--space-5);
       }
 
+      /* ===== Picker (snapshot tabset) ================================ */
+      .picker {
+        margin-top: var(--space-7);
+        /* Break out of the main .col so each preview fills a real viewport. */
+        width: min(calc(100vw - 2rem), 1280px);
+        position: relative;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .picker__lede {
+        margin: 0 0 var(--space-5);
+        max-width: 60ch;
+        color: var(--color-text-muted);
+      }
+      .picker__tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        border-bottom: 2px solid var(--color-border);
+      }
+      .picker__tab {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        border-bottom: 3px solid transparent;
+        margin-bottom: -2px;
+        padding: var(--space-3) var(--space-4);
+        font-family: inherit;
+        font-size: var(--text-base);
+        font-weight: 600;
+        color: var(--color-text-muted);
+        cursor: pointer;
+      }
+      .picker__tab:hover { color: var(--color-text); }
+      .picker__tab--active {
+        color: var(--color-primary);
+        border-bottom-color: var(--color-primary);
+      }
+      .picker__panel { width: 100%; }
+      .picker__panel iframe {
+        width: 100%;
+        height: clamp(480px, 75vh, 900px);
+        border: 1px solid var(--color-border);
+        border-top: 0;
+        background: var(--color-surface);
+        display: block;
+      }
+      .picker__choose { margin-top: var(--space-5); }
+
       /* ===== Notice =================================================== */
       .notice {
         margin-top: var(--space-4);
@@ -483,6 +532,19 @@
 
         <h3 class="block-title">Activity</h3>
         <ol id="log" class="log"></ol>
+      </section>
+
+      <section id="picker" class="picker" hidden aria-labelledby="picker-title">
+        <h2 id="picker-title">Choose a style</h2>
+        <p class="picker__lede">
+          A quick preview of each design style. Switch tabs to compare, then
+          click "Choose" to build the full accessible page in that style.
+        </p>
+        <div id="picker-tabs" class="picker__tabs" role="tablist" aria-label="Style previews"></div>
+        <div id="picker-panels"></div>
+        <div class="picker__choose">
+          <button id="picker-choose" type="button" class="btn btn-primary" disabled>Choose</button>
+        </div>
       </section>
 
       <section id="result" class="result" hidden aria-live="polite">
@@ -612,6 +674,7 @@
       function resetRun(target, startedAt) {
         log.innerHTML = "";
         result.hidden = true;
+        hidePicker();
         errorEl.hidden = true;
         panel.hidden = false;
         targetEl.textContent = target || "";
@@ -660,6 +723,109 @@
         $("result-text").textContent = text;
         setLink($("result-link"), url);
         setLink($("result-report"), reportUrl);
+      }
+
+      // ----- picker (snapshot tabset) ----------------------------------
+      let currentSnapshots = [];
+      let activeStyle = null;
+
+      function showPicker(snapshots) {
+        currentSnapshots = snapshots;
+        const tabs = $("picker-tabs");
+        const panels = $("picker-panels");
+        tabs.innerHTML = "";
+        panels.innerHTML = "";
+
+        snapshots.forEach((s) => {
+          const tab = document.createElement("button");
+          tab.type = "button";
+          tab.className = "picker__tab";
+          tab.id = "picker-tab-" + s.style;
+          tab.setAttribute("role", "tab");
+          tab.setAttribute("aria-controls", "picker-panel-" + s.style);
+          tab.dataset.style = s.style;
+          tab.textContent = s.name;
+          tabs.appendChild(tab);
+
+          const panel = document.createElement("div");
+          panel.className = "picker__panel";
+          panel.id = "picker-panel-" + s.style;
+          panel.setAttribute("role", "tabpanel");
+          panel.setAttribute("aria-labelledby", "picker-tab-" + s.style);
+          panel.innerHTML =
+            '<iframe src="' + escapeHtml(s.path) +
+            '" title="' + escapeHtml(s.name) +
+            ' preview"></iframe>';
+          panels.appendChild(panel);
+        });
+
+        setActiveTab(snapshots[0] ? snapshots[0].style : null);
+        $("picker").hidden = false;
+        phaseEl.textContent = "Choose a style";
+      }
+
+      function setActiveTab(style) {
+        activeStyle = style;
+        if (!style) return;
+        for (const tab of $("picker-tabs").children) {
+          const isActive = tab.dataset.style === style;
+          tab.classList.toggle("picker__tab--active", isActive);
+          tab.setAttribute("aria-selected", isActive ? "true" : "false");
+          tab.setAttribute("tabindex", isActive ? "0" : "-1");
+        }
+        for (const panel of $("picker-panels").children) {
+          panel.hidden = panel.id !== "picker-panel-" + style;
+        }
+        const match = currentSnapshots.find((s) => s.style === style);
+        const choose = $("picker-choose");
+        choose.textContent = "Choose " + (match ? match.name : style);
+        choose.dataset.style = style;
+        choose.disabled = false;
+      }
+
+      function hidePicker() {
+        $("picker").hidden = true;
+      }
+
+      function onTabClick(e) {
+        const tab = e.target.closest("button[role='tab']");
+        if (!tab) return;
+        const style = tab.dataset.style;
+        if (style && style !== activeStyle) setActiveTab(style);
+      }
+
+      function onTabKeydown(e) {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+        e.preventDefault();
+        const tabs = Array.from($("picker-tabs").children);
+        if (tabs.length === 0) return;
+        let idx = tabs.findIndex((t) => t.dataset.style === activeStyle);
+        if (e.key === "ArrowLeft") idx = (idx - 1 + tabs.length) % tabs.length;
+        if (e.key === "ArrowRight") idx = (idx + 1) % tabs.length;
+        if (e.key === "Home") idx = 0;
+        if (e.key === "End") idx = tabs.length - 1;
+        tabs[idx].focus();
+        setActiveTab(tabs[idx].dataset.style);
+      }
+
+      async function onChooseClick() {
+        const choose = $("picker-choose");
+        const style = choose.dataset.style;
+        if (!style) return;
+        $("picker-tabs")
+          .querySelectorAll("button")
+          .forEach((b) => (b.disabled = true));
+        choose.disabled = true;
+        try {
+          await fetch("/pick", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ style }),
+          });
+          // The style_picked event will hide the picker for everyone.
+        } catch {
+          /* a web_done failed event will settle the UI */
+        }
       }
 
       // Fold one event into the statistics and return a log line (or null).
@@ -768,9 +934,23 @@
           startTimer();
           return;
         }
+        if (ev.type === "snapshots_ready") {
+          showPicker(ev.snapshots || []);
+          return;
+        }
+        if (ev.type === "style_picked") {
+          hidePicker();
+          phaseEl.textContent = "Building the accessible version";
+          return;
+        }
         if (ev.type === "run_complete") {
           const decision = ev.decision || {};
           const base = (ev.localUrl || "").replace(/\/$/, "");
+          // Opencode serves a directory and exposes /report.html; the Claude
+          // backend's localUrl points directly at the artifact file, so don't
+          // append /report.html for it.
+          const reportUrl =
+            base && !base.endsWith(".html") ? base + "/report.html" : null;
           showResult(
             "completed",
             "An improved version is ready",
@@ -778,7 +958,7 @@
               (decision.outcome || "done") +
               (decision.reason ? " — " + decision.reason : ""),
             ev.localUrl,
-            base ? base + "/report.html" : null,
+            reportUrl,
           );
           return;
         }
@@ -853,6 +1033,10 @@
           /* the web_done event will settle the UI regardless */
         }
       });
+
+      $("picker-tabs").addEventListener("click", onTabClick);
+      $("picker-tabs").addEventListener("keydown", onTabKeydown);
+      $("picker-choose").addEventListener("click", onChooseClick);
 
       const source = new EventSource("/events");
       source.onmessage = (e) => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -9,6 +9,11 @@ import {
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
+import {
+  startClaudeFullRun,
+  startClaudeSnapshots,
+  type ClaudeSnapshot,
+} from "./claude-backend.js";
 
 /**
  * Browser front end for the swarm.
@@ -17,6 +22,9 @@ import { fileURLToPath } from "node:url";
  * launched as a child `dist/index.js --json-events` process — the same runner
  * the Rust TUI drives — so a run can be cleanly stopped by killing that child.
  * The child's event stream is relayed to the browser over Server-Sent Events.
+ *
+ * When `SWARM_BACKEND=claude`, a run is instead handed to a pre-launched Claude
+ * Code terminal — see {@link startClaudeRun} in src/claude-backend.ts.
  */
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
@@ -25,6 +33,13 @@ const port = Number(process.env.SWARM_WEB_PORT || 5180);
 const pagePath = join(rootDir, "web", "index.html");
 const fontsDir = join(rootDir, "web", "fonts");
 const runnerPath = join(rootDir, "dist", "index.js");
+
+/** Generation backend for the web UI, from `SWARM_BACKEND` (default opencode). */
+function swarmBackend(): "opencode" | "claude" {
+  return process.env.SWARM_BACKEND?.trim().toLowerCase() === "claude"
+    ? "claude"
+    : "opencode";
+}
 
 /** Lifecycle of the single run this server tracks at a time. */
 type RunStatus = "idle" | "running" | "completed" | "failed" | "stopped";
@@ -40,6 +55,12 @@ type RunState = {
   startedAt: number;
   /** Every event seen so far this run, so a late browser can catch up. */
   events: RunEvent[];
+  /** Absolute path to this run's directory; used by /artifact/ to serve files. */
+  runDir?: string;
+  /** Snapshots produced by phase 1 of the claude backend. */
+  snapshots?: ClaudeSnapshot[];
+  /** Style key the user picked after seeing the snapshots. */
+  style?: string;
 };
 
 const run: RunState = { status: "idle", target: "", startedAt: 0, events: [] };
@@ -55,6 +76,9 @@ const server = createServer((req, res) => {
   if (req.method === "GET" && path === "/events") return serveEvents(res);
   if (req.method === "POST" && path === "/run") return startRun(req, res);
   if (req.method === "POST" && path === "/stop") return stopRun(res);
+  if (req.method === "POST" && path === "/pick") return pickStyle(req, res);
+  if (req.method === "GET" && path.startsWith("/artifact/"))
+    return serveArtifact(res, path);
   res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
 });
 
@@ -149,10 +173,26 @@ function startRun(req: IncomingMessage, res: ServerResponse) {
       run.target = target;
       run.startedAt = Date.now();
       run.events.length = 0;
+      run.runDir = undefined;
+      run.snapshots = undefined;
+      run.style = undefined;
       stopping = false;
       respondJson(res, 200, { ok: true });
       broadcast({ type: "web_start", target, startedAt: run.startedAt });
-      spawnRun(target);
+      if (swarmBackend() === "claude") {
+        const runDir = createRunDir();
+        run.runDir = runDir;
+        startClaudeSnapshots({
+          target,
+          rootDir,
+          runDir,
+          emit: broadcast,
+          onSnapshotsReady: handleSnapshotsReady,
+          onFail: (message) => finish("failed", message),
+        });
+      } else {
+        spawnRun(target);
+      }
     })
     .catch(() => respondJson(res, 400, { error: "Could not read the request." }));
 }
@@ -185,7 +225,19 @@ function spawnRun(target: string) {
 
 /** Stops the in-progress run by killing the child process. */
 function stopRun(res: ServerResponse) {
-  if (run.status !== "running" || !child) {
+  if (run.status !== "running") {
+    respondJson(res, 409, { error: "No run is in progress." });
+    return;
+  }
+  if (swarmBackend() === "claude") {
+    // The Claude agent runs in the user's own terminal; this server has no
+    // child process to kill. TODO(claude-backend): wire a real cancel, e.g. a
+    // stop marker the playbook checks.
+    respondJson(res, 200, { ok: true });
+    finish("stopped", "Stopping the Claude terminal agent is not wired up yet.");
+    return;
+  }
+  if (!child) {
     respondJson(res, 409, { error: "No run is in progress." });
     return;
   }
@@ -309,6 +361,117 @@ function parseUrl(body: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Creates a fresh timestamped run directory, matching core.ts's layout. */
+function createRunDir(): string {
+  const dir = join(
+    rootDir,
+    "runs",
+    new Date().toISOString().replace(/[:.]/g, "-"),
+  );
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * Phase 1 succeeded. Stash the snapshots on the run state and tell every
+ * connected browser to show the picker; the user will POST /pick next.
+ */
+function handleSnapshotsReady(snapshots: ClaudeSnapshot[]) {
+  run.snapshots = snapshots;
+  broadcast({
+    type: "snapshots_ready",
+    snapshots: snapshots.map((s) => ({
+      style: s.style,
+      name: s.name,
+      path: `/artifact/${encodeURIComponent(s.file)}`,
+    })),
+  });
+}
+
+/** POST /pick — the user chose a style; advance to the full-generation phase. */
+function pickStyle(req: IncomingMessage, res: ServerResponse) {
+  if (run.status !== "running" || !run.runDir) {
+    respondJson(res, 409, { error: "No run is in progress." });
+    return;
+  }
+  if (!run.snapshots) {
+    respondJson(res, 409, { error: "Snapshots are not ready yet." });
+    return;
+  }
+  if (run.style) {
+    respondJson(res, 409, { error: "A style is already chosen for this run." });
+    return;
+  }
+  if (swarmBackend() !== "claude") {
+    respondJson(res, 409, { error: "Style picking is only used by the Claude backend." });
+    return;
+  }
+  readBody(req)
+    .then((body) => {
+      const style = parseStyle(body, run.snapshots);
+      if (!style) {
+        respondJson(res, 400, { error: "Unknown style." });
+        return;
+      }
+      run.style = style;
+      respondJson(res, 200, { ok: true });
+      broadcast({ type: "style_picked", style });
+      startClaudeFullRun({
+        target: run.target,
+        rootDir,
+        runDir: run.runDir!,
+        style,
+        emit: broadcast,
+        finish,
+        localUrlFor: (filename) =>
+          `http://localhost:${port}/artifact/${encodeURIComponent(filename)}`,
+      });
+    })
+    .catch(() => respondJson(res, 400, { error: "Could not read the request." }));
+}
+
+/** Validates `style` from the request body against the snapshots offered. */
+function parseStyle(body: string, snapshots?: ClaudeSnapshot[]): string | undefined {
+  let raw = "";
+  try {
+    raw = String((JSON.parse(body) as { style?: unknown }).style ?? "").trim();
+  } catch {
+    return undefined;
+  }
+  if (!raw || !snapshots) return undefined;
+  return snapshots.find((s) => s.style === raw)?.style;
+}
+
+/** GET /artifact/<filename> — serves a single file from the current run dir. */
+function serveArtifact(res: ServerResponse, urlPath: string) {
+  const rel = decodeURIComponent(urlPath.slice("/artifact/".length));
+  if (
+    !run.runDir ||
+    !rel ||
+    rel.includes("/") ||
+    rel.includes("\\") ||
+    rel.includes("..")
+  ) {
+    res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
+    return;
+  }
+  const file = join(run.runDir, rel);
+  if (!existsSync(file)) {
+    res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
+    return;
+  }
+  res.writeHead(200, { "Content-Type": artifactContentType(rel) });
+  res.end(readFileSync(file));
+}
+
+function artifactContentType(name: string): string {
+  if (name.endsWith(".html")) return "text/html; charset=utf-8";
+  if (name.endsWith(".json")) return "application/json; charset=utf-8";
+  if (name.endsWith(".md")) return "text/markdown; charset=utf-8";
+  if (name.endsWith(".txt")) return "text/plain; charset=utf-8";
+  return "application/octet-stream";
 }
 
 /** Loads the project `.env` so a run has the same secrets the CLI would. */
