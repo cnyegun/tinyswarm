@@ -597,7 +597,10 @@ function wcagForTags(tags: unknown) {
 // Agent prompts read compact axe artifacts by default. Raw axe output is kept in
 // sidecar files, so the compact form keeps rule metadata, a small node sample,
 // and extra locators without flooding the context window.
-function compactAxeViolations(violations: AxeViolationInput[]) {
+//
+// Exported (not on the public runSwarm API) so unit tests can pin slicing,
+// group-merging, and tag-enrichment behavior without spinning up Chromium.
+export function compactAxeViolations(violations: AxeViolationInput[]) {
   return violations.map((violation) => {
     const nodes = violation.nodes || [];
     const sampledNodes = nodes.slice(0, AXE_NODE_SAMPLE_LIMIT);
