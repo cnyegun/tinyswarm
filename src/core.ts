@@ -1280,10 +1280,12 @@ function reportHtml(run: RunState, report: ReportInputs) {
       outline-offset: var(--focus-offset);
     }
     h1, h2, h3, p { margin-block-start: 0; }
-    h1, h2, h3 { color: var(--color-text); line-height: var(--leading-tight); }
-    h1 { font-size: var(--text-2xl); font-weight: var(--weight-bold); letter-spacing: -0.02em; margin-block-end: var(--space-4); }
-    h2 { font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -0.01em; margin-block-end: var(--space-4); }
-    h3 { font-size: var(--text-lg); font-weight: var(--weight-semibold); letter-spacing: -0.01em; margin-block-end: var(--space-3); }
+    h1, h2, h3 { color: var(--color-text); }
+    /* Heading scale matches DESIGN.md §5.2 exactly: line-heights per row, h1
+       promoted to --color-primary (only the page h1 is allowed to use it). */
+    h1 { color: var(--color-primary); font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: 1.2; letter-spacing: -0.02em; margin-block-end: var(--space-4); }
+    h2 { font-size: var(--text-xl); font-weight: var(--weight-bold); line-height: 1.25; letter-spacing: -0.01em; margin-block-end: var(--space-4); }
+    h3 { font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: 1.3; letter-spacing: -0.01em; margin-block-end: var(--space-3); }
     p { max-width: 70ch; margin-block-end: var(--space-4); }
     ul { margin-block: 0; padding-inline-start: var(--space-5); }
     li + li { margin-block-start: var(--space-2); }
@@ -1297,9 +1299,15 @@ function reportHtml(run: RunState, report: ReportInputs) {
     .utility-bar__link { color: var(--color-text-inverse); }
     .utility-bar__link:hover { color: var(--color-text-inverse); }
     .utility-bar__link:focus-visible, .site-footer a:focus-visible { outline-color: var(--color-text-inverse); }
+    /* The 3px violet rule is DESIGN.md §8.1's optional brand detail -- the one
+       sanctioned use of --color-accent on the page. */
+    .brand-accent { height: 3px; background: var(--color-accent); }
     .brand-header { border-bottom: var(--border-hairline); background: var(--color-surface); }
     .brand-header__inner { display: grid; gap: var(--space-5); padding-block: var(--space-7); }
-    .brand-header__eyebrow { color: var(--color-text-muted); font-size: var(--text-sm); font-weight: var(--weight-semibold); margin-block-end: var(--space-2); }
+    .brand-header__eyebrow { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: var(--weight-bold); line-height: 1.4; letter-spacing: 0.06em; text-transform: uppercase; margin-block-end: var(--space-2); }
+    /* The 60×4px stripe under the page h1 is the valtioneuvosto.fi signature
+       move, expressed with our existing --color-primary token. */
+    .brand-header h1::after { content: ""; display: block; width: 60px; height: 4px; background: var(--color-primary); margin-block-start: var(--space-3); }
     .brand-header__lede { color: var(--color-text-muted); font-size: var(--text-base); margin-block-end: 0; }
     .action-list { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
     .button { display: inline-flex; align-items: center; min-height: var(--space-7); padding: var(--space-3) var(--space-5); border: var(--focus-offset) solid var(--color-primary); border-radius: var(--radius); font-size: var(--text-sm); font-weight: var(--weight-semibold); text-decoration: none; transition: background var(--duration) var(--easing); }
@@ -1340,13 +1348,17 @@ function reportHtml(run: RunState, report: ReportInputs) {
     .artifact-list__item { border-bottom: var(--border-hairline); padding-block-end: var(--space-3); }
     .data-table { font-size: var(--text-sm); }
     .violation-table code { background: var(--color-surface-subtle); padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-xs); }
+    /* DESIGN.md §8.12: right-align numbers, zebra allowed where density
+       requires it. The violations panel is the densest table here. */
+    .violation-table td:nth-child(3) { text-align: right; }
+    .violation-table tbody tr:nth-child(odd) { background: var(--color-surface-subtle); }
     .violation-status { font-weight: var(--weight-bold); white-space: nowrap; }
     .violation-status--fixed { color: var(--color-success); }
     .violation-status--remains { color: var(--color-error); }
     .agent-grid { display: grid; gap: var(--space-4); margin: 0; padding-inline-start: 0; list-style: none; }
     .agent-card { border: var(--border-hairline); padding: var(--space-5); background: var(--color-surface); display: grid; gap: var(--space-3); }
     .agent-card__header { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; justify-content: space-between; }
-    .agent-card__role { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 var(--space-1) 0; }
+    .agent-card__role { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: var(--weight-bold); line-height: 1.4; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 var(--space-1) 0; }
     .agent-card__title { font-size: var(--text-base); font-weight: var(--weight-bold); margin: 0; }
     .agent-card__badge { display: inline-flex; align-items: center; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); font-weight: var(--weight-bold); white-space: nowrap; }
     .agent-card__badge--success { background: var(--color-success-bg); color: var(--color-success); }
@@ -1390,6 +1402,7 @@ function reportHtml(run: RunState, report: ReportInputs) {
       <span>Generated locally from run artifacts</span>
     </div>
   </div>
+  <div class="brand-accent" aria-hidden="true"></div>
   <header class="brand-header">
     <div class="layout brand-header__inner">
       <div>
