@@ -89,6 +89,51 @@ config knobs the user has to learn. NOT fewer lines.
   (616 lines). It's a faithful opencode HTTP mock with scenario routing,
   not a smell.
 
+### Session 2 — inline axe compaction helper chain (branch `refactor/session-2`)
+
+**Target picked:** Candidate C from the session 1 list — the
+`compactAxeViolations → compactAxeNode → compactChecksForNode →
+compactCheckMessages` chain in `src/accessibility.ts`. Six hops to compact one
+node; three helpers each used in exactly one place.
+
+**What worked:**
+- Wrote `test/axe-compact.test.mjs` first (8 unit tests) pinning the slicing
+  behaviors the refactor would touch: any/all/none merge order, slice spanning
+  groups, additionalTargets dedup, wcag tag enrichment, nested target arrays,
+  omittedNodes math, undefined-field stripping.
+- Exported `compactAxeViolations` from `accessibility.ts` so the unit tests
+  could hit it directly instead of going through Chromium. Pure utility, not
+  in the frozen `runSwarm` API list — non-breaking.
+- Inlined `compactAxeNode` and its node-mapping body inside the
+  `sampledNodes.map(...)` call in `compactAxeViolations`. Collapsed
+  `compactChecksForNode + compactCheckMessages` into one `compactNodeChecks`
+  that builds the typed-group array via `flatMap` then slices once. Reading
+  the compaction now takes two hops, not four.
+- 8 unit tests + 5 integration tests + 49 other tests = 62 green throughout.
+
+**What I tried and abandoned:**
+- Considered also inlining `compactNodeChecks` into the node mapping. Tried
+  it locally; the inline version pushed the violation mapping body to ~25
+  lines and the per-group merging logic got tangled with the per-node check
+  shape. Kept as a small named helper because the name "compactNodeChecks"
+  carries real meaning (multi-group merge + slice).
+- Considered exporting more helpers (`compactAxeResult`, `wcagForTags`) for
+  symmetry. Rejected — they have only one caller each inside accessibility.ts
+  and exporting things "for symmetry" creates surface area that future
+  sessions have to honor.
+
+**Surprises:**
+- The existing accessibility integration test relies on real Chromium+axe to
+  produce ~90 violation nodes for the `image-alt` rule. The new unit tests
+  produce the same shape with hand-crafted input in milliseconds. Both
+  layers earn their keep — the integration test pins real-axe shape (which
+  could shift on axe upgrade), the unit tests pin the slice/merge rules.
+- `wcagForTags` reads `reference/wcag/wcag-map.json` at runtime and caches
+  the result in a module-level `wcagMapCache`. The unit test relies on that
+  file being present; if it ever goes missing the wcag-enrichment test will
+  fail with an informative `compact.wcag missing 1.4.3 entry` — better than
+  a silent miss.
+
 ## Candidates for future sessions
 
 Specific file:line targets, ranked by suspected payoff. Each entry is meant
@@ -128,21 +173,13 @@ forces the developer to remember both paths agree.
 
 **Smallest change that helps:** unclear. May actually be correct duplication.
 
-### C. accessibility.ts axe compaction layer (~120 lines, 7 helpers)
+### C. ~~accessibility.ts axe compaction layer~~ — DONE (session 2)
 
-- `compactAxeViolations`, `compactAxeResult`, `compactAxeNode`,
-  `compactChecksForNode`, `compactCheckMessages`, `truncateAxeTarget`,
-  `truncateAxeTargetItem`, `truncateEvidenceText`, `omitUndefinedFields`.
-- Each is small; the chain has six hops to compact one node.
-
-**Why complex:** tracing a field through six functions to understand a cap.
-The constants (`AXE_NODE_SAMPLE_LIMIT`, etc.) make sense in one place but
-each cap is enforced inside a different helper.
-
-**Smallest change that helps:** maybe inline `compactAxeNode` +
-`compactChecksForNode` into `compactAxeViolations`. Keep
-`truncateEvidenceText` / `omitUndefinedFields` (used multiple places).
-Tests in `test/accessibility.test.mjs` lock in cap values — safe to refactor.
+Inlined the single-use helpers; the remaining 5 helpers
+(`compactAxeViolations`, `compactAxeResult`, `compactNodeChecks`,
+`truncateAxeTarget(Item)`, `truncateEvidenceText`, `omitUndefinedFields`,
+`stringArray`, `wcagForTags`) are each used multiple places or carry real
+semantic load.
 
 ### D. `validateConfiguredModels` in `harness.ts:153-227`
 
@@ -204,6 +241,14 @@ but doubles the surface for "where do final paths come from."
 
 **Smallest change that helps:** unclear. The lines are human-formatted; the
 event is structured. May be correct duplication.
+
+### I. (discovered session 2) accessibility.ts type-input declarations
+
+Lines 30-54: `AxeCheckInput`, `AxeNodeInput`, `AxeViolationInput` types are
+~25 lines of duplicated-with-axe shape definitions because the axe SDK types
+don't expose the input shapes cleanly. The duplication is real but probably
+unavoidable; investigated and chose not to touch in session 2. Mentioned
+here so a future session doesn't burn time on it.
 
 ## What NOT to do
 
