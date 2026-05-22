@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "opencode-ai": "^1.15.7",
     "typescript": "^5.7.2"
   },
   "engines": {
