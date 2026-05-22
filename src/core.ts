@@ -111,8 +111,8 @@ export type IterationPaths = RunPaths & {
  * - A set of named reviewer agents and the prompt templates they use
  *
  * The swarm harness calls these methods in a fixed order:
- * `scan → briefPrompt → [findingsPrompt → aggregatePrompt → fixPrompt →
- * check → votePrompt → decisionPrompt]* → reportPrompt`
+ * `scan → briefPrompt → [fixPrompt → check → optional votePrompt →
+ * decisionPrompt]* → local report`
  *
  * @example
  * ```typescript
@@ -149,7 +149,7 @@ export type SwarmProfile = {
   /**
    * Runs automated validation on the current state of the artifact.
    * Called after every fixer pass; results are written to `checks.json` and
-   * fed into the vote and decision prompts.
+   * fed into the next fix prompt, reviewer votes, and decision prompts.
    * @param ctx - Run-level filesystem paths.
    * @param iteration - Current 1-based iteration number.
    */
@@ -160,18 +160,6 @@ export type SwarmProfile = {
    * a high-level task description consumed by all subsequent agent prompts.
    */
   briefPrompt(ctx: RunPaths): string;
-
-  /**
-   * Returns the prompt for a reviewer agent to produce its `findings/<id>.json`
-   * for the current iteration.
-   */
-  findingsPrompt(ctx: IterationPaths, reviewer: Reviewer): string;
-
-  /**
-   * Returns the prompt that instructs the orchestrator to merge all reviewer
-   * findings into `aggregate-feedback.json` and a `solver-task.md` work order.
-   */
-  aggregatePrompt(ctx: IterationPaths): string;
 
   /**
    * Returns the prompt that instructs the fixer agent to apply changes and
@@ -191,12 +179,6 @@ export type SwarmProfile = {
    */
   decisionPrompt(ctx: IterationPaths): string;
 
-  /**
-   * Returns the prompt that instructs the orchestrator to produce `report.md`
-   * and `report.html` summarizing the entire run.
-   * @param decision - Final decision from the last completed iteration, if one exists.
-   */
-  reportPrompt(ctx: RunPaths, decision?: Decision): string;
 };
 
 /**
@@ -274,14 +256,13 @@ const allowAll: PermissionRuleset = [
  * 3. Starts (or connects to) an opencode server and opens agent sessions.
  * 4. Runs the brief prompt to produce `brief.md`.
  * 5. Iterates up to `SWARM_MAX_ITERATIONS` times:
- *    - All reviewers produce findings concurrently.
- *    - The orchestrator aggregates findings into a solver task.
  *    - The fixer agent applies changes to the artifact.
  *    - Automated checks validate the artifact.
- *    - All reviewers cast votes concurrently.
+ *    - Failed checks go straight into the next fixer pass.
+ *    - Reviewers vote only after checks pass.
  *    - The orchestrator issues a decision (`accept` / `continue` / `stop_with_risks`).
  *    - The loop breaks early on `accept` or `stop_with_risks`.
- * 6. The orchestrator writes `report.md` and `report.html`.
+ * 6. A local deterministic report writer creates `report.md` and `report.html`.
  * 7. A local HTTP preview server starts and the final artifact is served.
  *
  * @param profile - Domain-specific profile that supplies all prompt templates and validation logic.
@@ -324,7 +305,7 @@ export async function runSwarm(
       if (lastDecision.outcome !== "continue") break;
     }
 
-    await writeFinalReport(run, harness, lastDecision);
+    writeFinalReport(run, lastDecision);
     const served = await serve(run, run.profile.artifact);
     log(run, "run", "completed", {
       decision: lastDecision,
@@ -399,10 +380,20 @@ function prepareRun(
     run,
     `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
   );
-  if (modelName(orchestratorModel) !== modelName(model))
-    console.log(`Orchestrator model: ${modelName(orchestratorModel)} (variant=${orchestratorModel.variant})`);
-  if (modelName(fixerModel) !== modelName(model))
-    console.log(`Fixer model: ${modelName(fixerModel)} (variant=${fixerModel.variant})`);
+  if (
+    modelName(orchestratorModel) !== modelName(model) ||
+    orchestratorModel.variant !== model.variant
+  )
+    console.log(
+      `Orchestrator model: ${modelName(orchestratorModel)} (variant=${orchestratorModel.variant})`,
+    );
+  if (
+    modelName(fixerModel) !== modelName(model) ||
+    fixerModel.variant !== model.variant
+  )
+    console.log(
+      `Fixer model: ${modelName(fixerModel)} (variant=${fixerModel.variant})`,
+    );
 
   emit(run, {
     type: "run_start",
@@ -431,7 +422,9 @@ function prepareRun(
     model: modelName(model),
     variant: model.variant,
     orchestratorModel: modelName(orchestratorModel),
+    orchestratorVariant: orchestratorModel.variant,
     fixerModel: modelName(fixerModel),
+    fixerVariant: fixerModel.variant,
     timeoutMs: Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000),
     pid: process.pid,
     node: process.version,
@@ -518,9 +511,8 @@ async function writeBrief(run: RunState, harness: AgentHarness) {
 /**
  * Creates the filesystem contract for one iteration.
  *
- * Example: iteration 1 gets `iterations/001/findings/` and
- * `iterations/001/votes/`. runIteration uses this context for every prompt in
- * the cycle so all agent outputs land under the same iteration directory.
+ * Example: iteration 1 gets `iterations/001/`. Prompt helpers create their own
+ * subdirectories as needed, so the loop only needs this one stable root.
  */
 function prepareIteration(run: RunState, iteration: number): IterationPaths {
   const iterDir = join(run.runDir, "iterations", pad(iteration));
@@ -530,8 +522,7 @@ function prepareIteration(run: RunState, iteration: number): IterationPaths {
     iterDir,
     iteration,
   };
-  mkdirSync(join(iterDir, "findings"), { recursive: true });
-  mkdirSync(join(iterDir, "votes"), { recursive: true });
+  mkdirSync(iterDir, { recursive: true });
   log(run, "iteration", "start", {
     iteration,
     iterDir: shown(run.rootDir, iterDir),
@@ -550,10 +541,9 @@ function prepareIteration(run: RunState, iteration: number): IterationPaths {
 /**
  * Runs one complete improvement cycle.
  *
- * This is the core loop body used by runSwarm. The order is the contract:
- * reviewers find issues, the orchestrator turns them into a task, the fixer
- * writes the artifact, automated checks run, reviewers vote, then the
- * orchestrator decides whether to stop or continue.
+ * This is the core loop body used by runSwarm. Keep the hot path simple: fix,
+ * check, then ask humans only if checks passed. Failed checks already mean the
+ * iteration cannot be accepted, so reviewer votes would be wasted.
  */
 async function runIteration(
   run: RunState,
@@ -561,19 +551,6 @@ async function runIteration(
   iteration: number,
 ): Promise<Decision> {
   const iter = prepareIteration(run, iteration);
-  await collectFindings(run, harness, iter);
-  await promptAgent(
-    harness,
-    run,
-    "orchestrator",
-    "aggregate",
-    join(iter.iterDir, "prompts", "aggregate.md"),
-    [
-      join(iter.iterDir, "aggregate-feedback.json"),
-      join(iter.iterDir, "solver-task.md"),
-    ],
-    run.profile.aggregatePrompt(iter),
-  );
   await promptAgent(
     harness,
     run,
@@ -586,7 +563,19 @@ async function runIteration(
     ],
     run.profile.fixPrompt(iter),
   );
-  await runChecks(run, iter);
+  const checks = await runChecks(run, iter);
+  if (!checks.passed) return decideFromFailedChecks(run, iter, checks);
+
+  if (run.profile.reviewers.length === 0) {
+    return recordDecision(run, iter, {
+      outcome: "accept",
+      reason: "automated checks passed and no reviewers are configured",
+      checksPass: true,
+      accepts: 0,
+      blocks: 0,
+    });
+  }
+
   await collectVotes(run, harness, iter);
   const decision = await decideIteration(run, harness, iter);
   emit(run, {
@@ -600,38 +589,12 @@ async function runIteration(
 }
 
 /**
- * Collects reviewer findings for the current artifact state.
- *
- * Reviewers are independent specialists, so running them in parallel preserves
- * the same contract while avoiding unnecessary wall-clock delay.
- */
-async function collectFindings(
-  run: RunState,
-  harness: AgentHarness,
-  iter: IterationPaths,
-) {
-  await Promise.all(
-    run.profile.reviewers.map((reviewer) =>
-      promptAgent(
-        harness,
-        run,
-        reviewer.id,
-        "findings",
-        join(iter.iterDir, "prompts", `${reviewer.id}-findings.md`),
-        [join(iter.iterDir, "findings", `${reviewer.id}.json`)],
-        run.profile.findingsPrompt(iter, reviewer),
-      ),
-    ),
-  );
-}
-
-/**
  * Runs deterministic validation after the fixer writes the candidate artifact.
  *
  * The resulting checks.json becomes evidence for both reviewer votes and the
  * orchestrator decision, so it must happen after fixing and before voting.
  */
-async function runChecks(run: RunState, iter: IterationPaths) {
+async function runChecks(run: RunState, iter: IterationPaths): Promise<CheckResult> {
   const checkStarted = Date.now();
   log(run, "check", "start", { iteration: iter.iteration });
   emit(run, { type: "check", iteration: iter.iteration, status: "start" });
@@ -683,13 +646,14 @@ async function runChecks(run: RunState, iter: IterationPaths) {
       "check",
       `...${checks.failures.length - 3} more failures in checks.json`,
     );
+  return checks;
 }
 
 /**
  * Collects reviewer votes after automated checks are available.
  *
- * Votes mirror findings: each reviewer can judge the candidate independently,
- * but now with transformed artifact, solver result, and checks.json evidence.
+ * Each reviewer can judge the passing candidate independently with the
+ * transformed artifact, solver result, and checks.json evidence.
  */
 async function collectVotes(
   run: RunState,
@@ -743,8 +707,40 @@ async function decideIteration(
       outcome: "stop_with_risks",
       reason: `max iterations reached: ${decision.reason}`,
     };
-    writeFileSync(decisionFile, JSON.stringify(decision, null, 2));
   }
+  return recordDecision(run, iter, decision);
+}
+
+/**
+ * Failed deterministic checks already decide the iteration. Save the decision
+ * locally instead of asking reviewers to vote on a candidate they cannot accept.
+ */
+function decideFromFailedChecks(
+  run: RunState,
+  iter: IterationPaths,
+  checks: CheckResult,
+): Decision {
+  const summary = checks.failures.slice(0, 3).join("; ");
+  const extra = checks.failures.length > 3 ? `; ...${checks.failures.length - 3} more` : "";
+  const reason = `automated checks failed: ${summary}${extra}`;
+  return recordDecision(run, iter, {
+    outcome: iter.iteration >= run.maxIterations ? "stop_with_risks" : "continue",
+    reason: iter.iteration >= run.maxIterations
+      ? `max iterations reached: ${reason}`
+      : reason,
+    checksPass: false,
+    accepts: 0,
+    blocks: 0,
+  });
+}
+
+function recordDecision(
+  run: RunState,
+  iter: IterationPaths,
+  decision: Decision,
+): Decision {
+  const decisionFile = join(iter.iterDir, "decision.json");
+  writeFileSync(decisionFile, JSON.stringify(decision, null, 2));
   log(run, "decision", decision.outcome, decision);
   emit(run, {
     type: "decision",
@@ -766,23 +762,275 @@ async function decideIteration(
 /**
  * Writes the human-facing report after the loop has a final decision.
  *
- * This stays separate from serving so report generation remains an agent file
- * contract, while preview serving remains a local runtime concern.
+ * Report generation is deterministic and local so the accepted artifact is not
+ * held behind one more model call. The report deliberately summarizes only
+ * compact artifacts that the workflow already produced.
  */
-async function writeFinalReport(
-  run: RunState,
-  harness: AgentHarness,
-  decision?: Decision,
-) {
-  await promptAgent(
-    harness,
+function writeFinalReport(run: RunState, decision?: Decision) {
+  const reportStarted = Date.now();
+  const outputs = [join(run.runDir, "report.md"), join(run.runDir, "report.html")];
+  log(run, "report", "start", { decision });
+  emit(run, {
+    type: "prompt",
+    phase: "report",
+    agent: "local",
+    status: "start",
+    outputs: outputs.map((path) => shown(run.rootDir, path)),
+  });
+  progress(run, "report", "writing local report");
+
+  const latest = latestIteration(run.runDir);
+  const iterDir = latest ? join(run.runDir, "iterations", latest) : undefined;
+  const checks = iterDir
+    ? readJsonObject(join(iterDir, "checks.json"))
+    : undefined;
+  const solver = iterDir
+    ? readJsonObject(join(iterDir, "solver-result.json"))
+    : undefined;
+  const votes = iterDir ? readVoteSummaries(run, iterDir) : [];
+  const markdown = reportMarkdown(run, {
+    latest,
+    decision,
+    checks,
+    solver,
+    votes,
+  });
+  const html = reportHtml(run, markdown);
+
+  writeFileSync(outputs[0], markdown);
+  writeFileSync(outputs[1], html);
+  const outputFiles = outputs.map((path) => fileState(run.rootDir, path));
+  log(run, "report", "written", {
+    elapsedMs: Date.now() - reportStarted,
+    outputs: outputFiles,
+  });
+  emit(run, {
+    type: "prompt",
+    phase: "report",
+    agent: "local",
+    status: "done",
+    outputs: outputFiles,
+  });
+  progress(
     run,
-    "orchestrator",
     "report",
-    join(run.runDir, "prompts", "report.md"),
-    [join(run.runDir, "report.md"), join(run.runDir, "report.html")],
-    run.profile.reportPrompt(run, decision),
+    `done ${duration(reportStarted)} ${artifactSummary(run.rootDir, outputs)}`,
   );
+}
+
+type VoteSummary = {
+  id: string;
+  name: string;
+  vote: string;
+  score?: number;
+  reason: string;
+};
+
+type ReportInputs = {
+  latest: string;
+  decision?: Decision;
+  checks?: Record<string, unknown>;
+  solver?: Record<string, unknown>;
+  votes: VoteSummary[];
+};
+
+function readVoteSummaries(run: RunState, iterDir: string): VoteSummary[] {
+  return run.profile.reviewers.flatMap((reviewer) => {
+    const data = readJsonObject(join(iterDir, "votes", `${reviewer.id}.json`));
+    if (!data) return [];
+    return [
+      {
+        id: reviewer.id,
+        name: reviewer.name,
+        vote: stringValue(data.vote) || "unknown",
+        score: numberValue(data.score),
+        reason: stringValue(data.reason) || "no reason recorded",
+      },
+    ];
+  });
+}
+
+function readJsonObject(file: string): Record<string, unknown> | undefined {
+  if (!existsSync(file)) return undefined;
+  try {
+    const data = JSON.parse(readFileSync(file, "utf8"));
+    return data && typeof data === "object" && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function reportMarkdown(run: RunState, report: ReportInputs) {
+  const failures = stringArray(report.checks?.failures);
+  const fixes = stringArray(report.solver?.accessibilityFixes);
+  const preservation = stringArray(report.solver?.preservationNotes);
+  const removed = stringArray(report.solver?.removedContent);
+  const risks = stringArray(report.solver?.residualRisks);
+  const solverSummary = stringValue(report.solver?.summary);
+  const changeSummary = fixes.length
+    ? fixes
+    : solverSummary
+      ? [solverSummary]
+      : ["No solver summary was recorded."];
+  const riskSummary = risks.length
+    ? risks
+    : ["No residual risks were recorded by the fixer or decision step."];
+  if (report.decision?.outcome === "stop_with_risks" && report.decision.reason)
+    riskSummary.unshift(report.decision.reason);
+
+  const lines = [
+    "# Swarm Report",
+    "",
+    "## Outcome",
+    `- Profile: ${compactText(run.profile.id)}`,
+    `- Input: ${compactText(run.input)}`,
+    `- Final iteration: ${report.latest || "none"}`,
+    `- Decision: ${report.decision?.outcome || "unknown"}`,
+    `- Automated checks: ${checkStatus(report.checks)}`,
+    `- Reviewer tally: ${report.decision?.accepts ?? 0} accept, ${report.decision?.blocks ?? 0} block`,
+    `- Decision reason: ${compactText(report.decision?.reason || "No decision reason recorded.")}`,
+    "",
+    "## Implementation Summary",
+    ...bulletLines(changeSummary),
+    "",
+    "## Preservation And Scope",
+    ...bulletLines(
+      preservation.length
+        ? preservation
+        : [
+            "Review the final artifact against the source page for content, task flow, and brand/vibe preservation.",
+          ],
+    ),
+    ...(removed.length
+      ? ["", "## Removed Or Reworked Content", ...bulletLines(removed)]
+      : []),
+    "",
+    "## Reviewer Votes",
+    ...(report.votes.length
+      ? report.votes.map(
+          (vote) =>
+            `- ${compactText(vote.name)}: ${compactText(vote.vote)}${vote.score === undefined ? "" : ` (${vote.score})`} - ${compactText(vote.reason)}`,
+        )
+      : ["- No reviewer votes were recorded for the final iteration."]),
+    ...(failures.length
+      ? ["", "## Check Failures", ...bulletLines(failures)]
+      : []),
+    "",
+    "## Residual Risks And Limits",
+    ...bulletLines([
+      ...riskSummary,
+      "Passing automated checks is useful evidence, not a full WCAG conformance claim.",
+      "Manual keyboard, screen reader, zoom/reflow, responsive, and content-owner review should still verify production behavior.",
+    ]),
+    "",
+    "## Artifacts",
+    ...artifactLinks(run, report.latest).map(
+      (artifact) => `- [${artifact.label}](${artifact.href})`,
+    ),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function reportHtml(run: RunState, markdown: string) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swarm Report</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f6f7fb; color: #141821; }
+    main { max-width: 78ch; margin: 0 auto; padding: 2rem 1rem 4rem; }
+    h1 { line-height: 1.15; }
+    nav { display: flex; flex-wrap: wrap; gap: .75rem; margin-block: 1rem 1.5rem; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #fff; border: 1px solid #d9deea; border-radius: .75rem; }
+    a { color: #0b57d0; }
+    @media (prefers-color-scheme: dark) { body { background: #10131a; color: #eef2ff; } pre { background: #171b25; border-color: #343b4f; } a { color: #8ab4ff; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Swarm Report</h1>
+    <nav aria-label="Report links">
+      <a href="${escapeHtml(run.profile.artifact)}">Transformed artifact</a>
+      <a href="report.md">Markdown report</a>
+      <a href="brief.md">Brief</a>
+    </nav>
+    <pre>${escapeHtml(markdown)}</pre>
+  </main>
+</body>
+</html>
+`;
+}
+
+function checkStatus(checks?: Record<string, unknown>) {
+  if (!checks) return "not available";
+  const failures = stringArray(checks.failures);
+  const axeViolations = Array.isArray(checks.axeViolations)
+    ? checks.axeViolations.length
+    : undefined;
+  const status = checks.passed === true ? "passed" : "failed";
+  const axe = axeViolations === undefined
+    ? ""
+    : `, ${axeViolations} axe ${plural(axeViolations, "violation")}`;
+  return `${status} (${failures.length} ${plural(failures.length, "failure")}${axe})`;
+}
+
+function artifactLinks(run: RunState, latest: string) {
+  const links = [
+    { label: run.profile.artifact, href: run.profile.artifact },
+    { label: "report.md", href: "report.md" },
+    { label: "brief.md", href: "brief.md" },
+  ];
+  if (latest) {
+    links.push(
+      { label: "checks.json", href: `iterations/${latest}/checks.json` },
+      { label: "decision.json", href: `iterations/${latest}/decision.json` },
+      {
+        label: "solver-result.json",
+        href: `iterations/${latest}/solver-result.json`,
+      },
+    );
+  }
+  return links;
+}
+
+function bulletLines(items: string[]) {
+  return items.map((item) => `- ${compactText(item)}`);
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" ? value : undefined;
+}
+
+function compactText(text: string) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > 360 ? `${clean.slice(0, 357)}...` : clean;
+}
+
+function plural(count: number, singular: string) {
+  return count === 1 ? singular : `${singular}s`;
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 /**
@@ -1341,19 +1589,22 @@ function listen(server: Server, port: number) {
 /**
  * Parses `SWARM_MODEL` into its constituent parts.
  * `SWARM_ORCHESTRATOR_MODEL` and `SWARM_FIXER_MODEL` override it for those sessions.
+ * Reviewer sessions are intentionally hard-coded to low reasoning while the
+ * orchestrator and fixer stay at max.
  * Expected format: `<providerID>/<modelID>` (e.g. `"deepseek/deepseek-v4-flash"`).
  *
  * @returns Object with `providerID`, `modelID`, and `variant`.
  */
 function modelSpec(key?: string) {
   let model = process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash";
-  if (key === "orchestrator") model = process.env.SWARM_ORCHESTRATOR_MODEL || model;
+  if (key === "orchestrator")
+    model = process.env.SWARM_ORCHESTRATOR_MODEL || model;
   if (key === "fixer") model = process.env.SWARM_FIXER_MODEL || model;
   const [providerID, ...rest] = model.split("/");
   return {
     providerID,
     modelID: rest.join("/"),
-    variant: process.env.SWARM_VARIANT || "max",
+    variant: key === "orchestrator" || key === "fixer" ? "max" : "low",
   };
 }
 

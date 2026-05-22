@@ -74,7 +74,7 @@ const scenarios = {
   },
   "stop-with-risks": {
     maxIterations: "3",
-    checks: [false],
+    checks: [true],
     decisions: ["stop_with_risks"],
   },
   "scan-failure": {
@@ -170,10 +170,6 @@ const scenarios = {
     maxIterations: "3",
     checks: [true],
     decisions: ["accept"],
-    promptFailsForPhase: "findings",
-    promptFailsForReviewer: "alpha",
-    promptFailureDelayMs: 100,
-    expectError: /session prompt|prompt unavailable|ResponseStatusError|500/,
   },
   "vote-prompt-error": {
     maxIterations: "3",
@@ -392,17 +388,6 @@ function createProfile() {
       };
     },
     briefPrompt: ({ runDir }) => promptText("brief", { runDir }, [join(runDir, "brief.md")]),
-    findingsPrompt: ({ runDir, iterDir, iteration }, reviewer) =>
-      promptText(
-        "findings",
-        { runDir, iterDir, iteration, reviewer: reviewer.id },
-        [join(iterDir, "findings", `${reviewer.id}.json`)],
-      ),
-    aggregatePrompt: ({ runDir, iterDir, iteration }) =>
-      promptText("aggregate", { runDir, iterDir, iteration }, [
-        join(iterDir, "aggregate-feedback.json"),
-        join(iterDir, "solver-task.md"),
-      ]),
     fixPrompt: ({ runDir, iterDir, iteration }) =>
       promptText("fix", { runDir, iterDir, iteration }, [
         join(runDir, "artifact.html"),
@@ -418,12 +403,6 @@ function createProfile() {
       promptText("decision", { runDir, iterDir, iteration }, [
         join(iterDir, "decision.json"),
       ]),
-    reportPrompt: ({ runDir }, decision) =>
-      promptText(
-        "report",
-        { runDir, finalDecision: JSON.stringify(decision || null) },
-        [join(runDir, "report.md"), join(runDir, "report.html")],
-      ),
   };
 }
 
@@ -437,7 +416,6 @@ function promptText(phase, details, outputs) {
     details.reviewer ? `REVIEWER: ${details.reviewer}` : undefined,
     `RUN_DIR: ${details.runDir}`,
     details.iterDir ? `ITER_DIR: ${details.iterDir}` : undefined,
-    details.finalDecision ? `FINAL_DECISION: ${details.finalDecision}` : undefined,
     availableFiles.length ? "AVAILABLE_FILES:" : undefined,
     ...availableFiles.map((path) => `* ${path}`),
     "OUTPUTS:",
@@ -584,28 +562,6 @@ function writePromptOutputs(phase, text, outputs) {
     writeTouched(outputs[0], `# Brief\n\nScenario ${scenarioName}\n`);
     return;
   }
-  if (phase === "findings") {
-    writeTouched(
-      outputs[0],
-      JSON.stringify(
-        { role: reviewer, findings: [`${reviewer} finding ${iteration}`], risk: "low" },
-        null,
-        2,
-      ),
-    );
-    return;
-  }
-  if (phase === "aggregate") {
-    writeTouched(
-      outputs.find((output) => output.endsWith("aggregate-feedback.json")),
-      JSON.stringify({ summary: `aggregate ${iteration}`, priorities: [], risks: [] }, null, 2),
-    );
-    writeTouched(
-      outputs.find((output) => output.endsWith("solver-task.md")),
-      `# Solver task ${iteration}\n`,
-    );
-    return;
-  }
   if (phase === "fix") {
     writeTouched(
       outputs.find((output) => output.endsWith("artifact.html")),
@@ -655,14 +611,6 @@ function writePromptOutputs(phase, text, outputs) {
       ),
     );
     return;
-  }
-  if (phase === "report") {
-    const finalDecision = field(text, "FINAL_DECISION") || "null";
-    writeTouched(outputs.find((output) => output.endsWith("report.md")), `# Report\n\n${finalDecision}\n`);
-    writeTouched(
-      outputs.find((output) => output.endsWith("report.html")),
-      `<!doctype html><html><head><title>Report</title></head><body><main><h1>Report</h1><pre>${escapeHtml(finalDecision)}</pre></main></body></html>`,
-    );
   }
 }
 
@@ -816,14 +764,6 @@ function sleep(ms) {
 function describeError(error) {
   if (!error) return "";
   return error instanceof Error ? error.message : String(error);
-}
-
-function escapeHtml(text) {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 async function printResultAndExit(code, result) {

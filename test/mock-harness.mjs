@@ -118,18 +118,18 @@ try {
   if (!original.includes(`${sourceOrigin}/assets/logo.svg`)) throw new Error("original.html did not absolutize image URL");
   if (!checks.passed) throw new Error(`latest checks did not pass: ${JSON.stringify(checks.failures)}`);
   if (decision.outcome !== "accept") throw new Error(`expected accept decision, got ${decision.outcome}`);
-  if (!report.includes("Mock swarm report")) throw new Error("report.html was not served");
+  if (!report.includes("Swarm Report")) throw new Error("report.html was not served");
   if (!brief.includes("Mock accessibility brief")) throw new Error("brief.md was not served");
-  if (sessionCount !== 6) throw new Error(`expected 6 reused sessions, got ${sessionCount}`);
+  if (sessionCount !== 4) throw new Error(`expected 4 reused sessions, got ${sessionCount}`);
   if (!prompts.some(p => p.text.includes("Output:") && p.text.includes("brief.md"))) throw new Error("brief prompt missing");
-  if (prompts.filter(p => p.text.includes("Output:") && p.text.includes("findings/")).length !== 8) throw new Error("reviewer findings did not run every iteration");
+  if (prompts.some(p => p.text.includes("findings/"))) throw new Error("reviewer findings should not run");
+  if (prompts.filter(p => /^Output: .+\/votes\//m.test(p.text)).length !== 2) throw new Error("expected 2 reviewer votes after checks passed");
   if (new Set(prompts.filter(p => p.text.includes("swarm orchestrator")).map(p => p.sessionID)).size !== 1) throw new Error("orchestrator session was not reused");
-  if (!prompts.some(p => p.text.includes("Color/theme repair guardrail") && p.text.includes("bg-background opacity variants"))) throw new Error("aggregate prompt missing color guardrail");
+  if (prompts.some(p => p.text.includes("aggregate-feedback.json"))) throw new Error("aggregate prompt should not run");
   if (!prompts.some(p => p.text.includes("Color fixes must repair the whole computed color system") && p.text.includes("bg-background/85"))) throw new Error("fix prompt missing color guardrail");
   if (!existsSync(join(runDir, "prompts", "brief.md"))) throw new Error("brief prompt was not saved");
   if (!existsSync(join(runDir, "iterations", "001", "prompts", "fix.md"))) throw new Error("fix prompt was not saved");
   if (!existsSync(join(runDir, "iterations", "001", "checks-full.json"))) throw new Error("checks-full.json was not saved");
-  if (!existsSync(join(runDir, "prompts", "report.md"))) throw new Error("report prompt was not saved");
   console.log(`mock swarm test passed: ${local}`);
 } finally {
   if (app) {
@@ -142,21 +142,12 @@ try {
 
 async function writeMockOutput(prompt) {
   const outputs = outputPaths(prompt);
-  if (outputs.some(p => p.endsWith("report.md"))) {
-    write(outputs.find(p => p.endsWith("report.md")), "# Mock swarm report\n\nAccepted.\n");
-    write(outputs.find(p => p.endsWith("report.html")), "<!doctype html><html lang=\"en\"><head><title>Mock swarm report</title></head><body><main><h1>Mock swarm report</h1><a href=\"/\">Transformed</a></main></body></html>");
-  }
-  else if (outputs.some(p => p.endsWith("decision.json"))) write(outputs[0], decision(prompt));
+  if (outputs.some(p => p.endsWith("decision.json"))) write(outputs[0], decision(prompt));
   else if (outputs.some(p => p.includes("/votes/"))) write(outputs[0], vote(prompt));
   else if (outputs.some(p => p.endsWith("transformed.html"))) {
-    write(outputs.find(p => p.endsWith("transformed.html")), html(prompt.includes("iteration 1")));
+    write(outputs.find(p => p.endsWith("transformed.html")), html(/fixer for iteration 1\b/.test(prompt)));
     write(outputs.find(p => p.endsWith("solver-result.json")), JSON.stringify({ changed: true, summary: "mock fix applied" }, null, 2));
   }
-  else if (outputs.some(p => p.endsWith("aggregate-feedback.json"))) {
-    write(outputs.find(p => p.endsWith("aggregate-feedback.json")), JSON.stringify({ summary: "mock feedback", priorities: ["fix landmarks"], risks: [] }, null, 2));
-    write(outputs.find(p => p.endsWith("solver-task.md")), "# Solver task\n\nFix landmarks, title, and mobile layout.\n");
-  }
-  else if (outputs.some(p => p.includes("/findings/"))) write(outputs[0], finding(outputs[0]));
   else if (outputs.some(p => p.endsWith("brief.md"))) write(outputs.find(p => p.endsWith("brief.md")), "# Mock accessibility brief\n\nReview the page.\n");
 }
 
@@ -190,14 +181,9 @@ function vote(prompt) {
   return JSON.stringify({ vote: checks.passed ? "accept" : "revise", score: checks.passed ? 95 : 40, reason: checks.passed ? "passes mock checks" : "needs repair" }, null, 2);
 }
 
-function finding(path) {
-  const role = path.match(/findings\/([^/]+)\.json$/)?.[1] || "reviewer";
-  return JSON.stringify({ role, findings: [`${role} mock finding`], risk: "medium" }, null, 2);
-}
-
 function decision(prompt) {
   const checks = checksFromPrompt(prompt);
-  const accepts = checks.passed ? 4 : 0;
+  const accepts = checks.passed ? 2 : 0;
   return JSON.stringify({ outcome: checks.passed ? "accept" : "continue", reason: checks.passed ? "passes mock checks" : "needs another iteration", checksPass: checks.passed, accepts, blocks: 0 }, null, 2);
 }
 

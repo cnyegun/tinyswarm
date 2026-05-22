@@ -24,17 +24,12 @@ const PANEL_PAD_Y: u16 = 1;
 pub fn draw(frame: &mut Frame, app: &App) {
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Min(24),
-            Constraint::Length(4),
-        ])
+        .constraints([Constraint::Length(5), Constraint::Min(24)])
         .spacing(1)
         .split(frame.area());
 
     draw_header(frame, root[0], app);
     draw_dashboard(frame, root[1], app);
-    draw_footer(frame, root[2], app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -484,39 +479,6 @@ fn artifact_line(icon: &str, name: &str, ready: bool, fallback: &str) -> Line<'s
         styled(if ready { " " } else { "◌ " }, color),
         styled(status, color),
     ])
-}
-
-fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
-    let block = panel_block("");
-    let inner = padded(block.inner(area), 1, 0);
-    frame.render_widget(block, area);
-    let command = Line::from(vec![
-        styled("› ", GREEN),
-        styled(
-            clip(&app.command, inner.width.saturating_sub(55) as usize),
-            CYAN,
-        ),
-        Span::raw("    "),
-        styled("q", CYAN),
-        Span::raw(" quit    "),
-        styled("j", CYAN),
-        Span::raw(" down    "),
-        styled("k", CYAN),
-        Span::raw(" up    "),
-        styled("/", CYAN),
-        Span::raw(" search    "),
-        styled("?", CYAN),
-        Span::raw(" help"),
-    ]);
-
-    let tabs = Line::from(vec![
-        Span::raw("  1: "),
-        styled_mod("opencode*", CYAN, Modifier::BOLD),
-        Span::raw("      2: npm-logs      3: server"),
-        Span::raw("      "),
-        styled(app.last_clock.clone(), DIM),
-    ]);
-    frame.render_widget(Paragraph::new(vec![command, tabs]), inner);
 }
 
 fn workflow_line(label: &str, status: StepStatus, width: u16) -> Line<'static> {
