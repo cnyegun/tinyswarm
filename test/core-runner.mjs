@@ -547,7 +547,7 @@ async function startOpencodeServer() {
           );
           return;
         }
-        if (scenario.delayParallelMs && (phase === "findings" || phase === "vote"))
+        if (scenario.delayParallelMs && phase === "vote")
           await sleep(scenario.delayParallelMs);
         if (scenario.omitOutputsForPhase !== phase) writePromptOutputs(phase, text, outputs);
         json(res, {

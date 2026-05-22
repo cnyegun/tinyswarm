@@ -30,8 +30,7 @@ export type { RunSwarmOptions, SwarmEvent, SwarmReporter } from "./reporter.js";
 
 /**
  * Identifies a reviewer agent participating in the swarm evaluation loop.
- * Each reviewer runs independently in its own opencode session and produces
- * structured findings and votes per iteration.
+ * Each reviewer runs independently in its own opencode session and votes per iteration.
  */
 export type Reviewer = {
   /** Stable machine identifier used as a session key and filename prefix (e.g. `"a11y"`). */
@@ -91,7 +90,7 @@ export type RunPaths = {
 /**
  * Extends {@link RunPaths} with per-iteration paths and numbering.
  * Passed to profile methods that generate prompts or consume outputs scoped to
- * a single iteration (findings, fix, vote, decision).
+ * a single iteration (fix, vote, decision).
  */
 export type IterationPaths = RunPaths & {
   /** Absolute path to this iteration's output directory (e.g. `.../iterations/001`). */
@@ -1872,7 +1871,7 @@ async function sessionFor(
  * @param harness - Live harness with the SDK client.
  * @param run - Current run state for display paths, session directory, and logging.
  * @param key - Logical agent name (matches a session key in `harness.sessions`).
- * @param phase - Display label used in progress output (e.g. `"findings"`, `"fix"`).
+ * @param phase - Display label used in progress output (e.g. `"fix"`, `"vote"`).
  * @param promptFile - Absolute path where the prompt markdown will be saved.
  * @param outputs - Absolute paths of files expected to exist and change before this resolves.
  * @param text - The full prompt text to send.

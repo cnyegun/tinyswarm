@@ -582,7 +582,6 @@ fn compact_phase(phase: &str) -> String {
         return "iter".to_string();
     }
     match phase {
-        "findings" => "review".to_string(),
         "decision" => "decide".to_string(),
         _ => phase.chars().take(10).collect(),
     }

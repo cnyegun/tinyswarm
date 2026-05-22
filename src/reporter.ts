@@ -67,19 +67,6 @@ export function promptOutputEvent(
   phase: string,
   outputs: string[],
 ): SwarmEvent | undefined {
-  if (phase === "findings") {
-    const data = readJsonObject(outputs[0]);
-    const findings = stringArray(data?.findings);
-    return {
-      type: "reviewer",
-      id: key,
-      phase: "findings",
-      status: "done",
-      risk: stringValue(data?.risk) || "unknown",
-      summary: summarizeReviewerText(findings[0] || "no proven issues"),
-      findings: findings.length,
-    };
-  }
   if (phase === "vote") {
     const data = readJsonObject(outputs[0]);
     return {
@@ -109,12 +96,6 @@ function readJsonObject(file?: string) {
   } catch {
     return undefined;
   }
-}
-
-function stringArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
 }
 
 function stringValue(value: unknown) {

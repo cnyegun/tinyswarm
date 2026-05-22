@@ -405,7 +405,7 @@ test("runSwarm passes configured agent, model, role variant, title, and permissi
     ]);
   }
   for (const { phase, request, text } of result.promptRequests) {
-    const isMax = !["findings", "vote"].includes(phase);
+    const isMax = phase !== "vote";
     assert.match(text, new RegExp(`RUN_DIR: ${escapeRegExp(result.runDir)}`));
     assert.equal(request.agent, "architect-test-agent");
     assert.deepEqual(request.model, {
@@ -429,7 +429,7 @@ test("runSwarm can use pro model for orchestrator and fixer only", async () => {
     });
   }
   for (const { phase, request } of result.promptRequests) {
-    const isPro = !["findings", "vote"].includes(phase);
+    const isPro = phase !== "vote";
     assert.deepEqual(request.model, {
       providerID: isPro ? "pro-provider" : "flash-provider",
       modelID: isPro ? "pro-model" : "flash-model",
