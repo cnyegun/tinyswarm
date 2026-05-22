@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
 import { accessibilityProfile } from "./accessibility.js";
 import { runSwarm, type SwarmEvent, type SwarmReporter } from "./core.js";
@@ -9,6 +12,8 @@ const jsonEvents = rawArgs.includes("--json-events");
 const args = rawArgs.filter((arg) => arg !== "--json-events");
 const input = args[0] === "accessibility" ? args[1] : args[0];
 const reporter = jsonEvents ? jsonReporter() : undefined;
+
+loadLocalEnv(rootDir, jsonEvents);
 
 if (!input) {
   if (jsonEvents) writeEvent({ type: "error", message: "missing input" });
@@ -29,4 +34,17 @@ function jsonReporter(): SwarmReporter {
 
 function writeEvent(event: SwarmEvent) {
   process.stdout.write(`${JSON.stringify(event)}\n`);
+}
+
+function loadLocalEnv(rootDir: string, jsonEvents: boolean) {
+  const envFile = join(rootDir, ".env");
+  if (!existsSync(envFile)) return;
+  try {
+    loadEnvFile(envFile);
+  } catch (error) {
+    const message = `failed to load .env: ${error instanceof Error ? error.message : String(error)}`;
+    if (jsonEvents) writeEvent({ type: "error", message });
+    else console.error(`[swarm] ${message}`);
+    process.exit(1);
+  }
 }
