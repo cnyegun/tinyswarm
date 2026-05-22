@@ -87,6 +87,11 @@ dist
 runs/
 tui/target/
 
+# WCAG 2.2 source spec — parsed into the committed reference/wcag/ by
+# `npm run build:wcag`; the 500KB+ HTML itself is not tracked.
+WCAG_2.2.html
+WCAG_2.2_files/
+
 # Gatsby files
 .cache/
 # Comment in the public line in if your project uses Gatsby and not Next.js

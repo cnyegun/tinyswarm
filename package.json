@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:wcag": "node scripts/build-wcag.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "test:core": "npm run build && node --test test/core.test.mjs",
     "swarm": "npm run build && node dist/index.js",
