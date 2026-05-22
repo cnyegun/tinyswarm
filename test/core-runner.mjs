@@ -242,6 +242,26 @@ const state = {
   touchCounter: 0,
 };
 
+// Capturing reporter: behaves like consoleReporter so existing consoleLines
+// assertions keep passing, and additionally records events, progress, and line
+// calls so observability.test.mjs can lock in the full reporter surface.
+const capturedEvents = [];
+const capturedProgress = [];
+const capturedLines = [];
+const reporter = {
+  line: (text) => {
+    capturedLines.push(text);
+    console.log(text);
+  },
+  progress: (phase, message) => {
+    capturedProgress.push({ phase, message });
+    console.log(`[${phase}] ${message}`);
+  },
+  event: (event) => {
+    capturedEvents.push(event);
+  },
+};
+
 try {
   rmSync(join(rootDir, "runs"), { recursive: true, force: true });
   mkdirSync(rootDir, { recursive: true });
@@ -274,7 +294,7 @@ try {
   const profile = createProfile();
   let caught;
   try {
-    await runSwarm(profile, `input-for-${scenarioName}`, rootDir);
+    await runSwarm(profile, `input-for-${scenarioName}`, rootDir, { reporter });
   } catch (error) {
     caught = error;
   }
@@ -313,6 +333,9 @@ try {
     maxActiveByPhase: state.maxActiveByPhase,
     unexpectedRequests: state.unexpectedRequests,
     runTree: runDir ? tree(runDir) : [],
+    capturedEvents,
+    capturedProgress,
+    capturedLines,
   };
   await close(opencode);
   await close(portBlocker);
@@ -331,6 +354,9 @@ try {
     promptCount: state.promptRequests.length,
     maxActiveByPhase: state.maxActiveByPhase,
     unexpectedRequests: state.unexpectedRequests,
+    capturedEvents,
+    capturedProgress,
+    capturedLines,
   };
   await close(opencode);
   await close(portBlocker);
