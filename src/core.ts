@@ -217,6 +217,8 @@ type AgentHarness = {
   close?: () => void;
   /** Maps logical agent keys (e.g. `"orchestrator"`, `"fixer"`) to their opencode session IDs. */
   sessions: Record<string, string>;
+  /** Whether the configured opencode models were already checked for this harness. */
+  modelsValidated?: boolean;
 };
 
 /** Explicit per-run state threaded through operational helpers. */
@@ -834,6 +836,7 @@ async function ensureHarness(run: RunState): Promise<AgentHarness> {
       sessions: {},
     };
     log(run, "opencode", "using existing server", { url });
+    await validateConfiguredModels(run, run.harness);
     return run.harness;
   }
   const serverStarted = Date.now();
@@ -867,7 +870,84 @@ async function ensureHarness(run: RunState): Promise<AgentHarness> {
     run: shown(run.rootDir, run.runDir),
     elapsedMs: Date.now() - serverStarted,
   });
+  await validateConfiguredModels(run, run.harness);
   return run.harness;
+}
+
+/**
+ * Fails fast when SWARM_MODEL points at a provider/model that opencode cannot use.
+ *
+ * opencode accepts `promptAsync` before model execution begins; without this preflight,
+ * a provider/model error can surface only in opencode's own logs while runSwarm keeps
+ * polling for output files that will never be written.
+ */
+async function validateConfiguredModels(run: RunState, harness: AgentHarness) {
+  if (harness.modelsValidated) return;
+  const started = Date.now();
+  const specs = [
+    { key: "default", model: modelSpec() },
+    { key: "orchestrator", model: modelSpec("orchestrator") },
+    { key: "fixer", model: modelSpec("fixer") },
+  ];
+  const uniqueSpecs = Array.from(
+    new Map(specs.map((spec) => [modelName(spec.model), spec])).values(),
+  );
+  log(run, "opencode", "model preflight start", {
+    models: uniqueSpecs.map((spec) => ({
+      key: spec.key,
+      model: modelName(spec.model),
+      variant: spec.model.variant,
+    })),
+  });
+  const result = await harness.client.config
+    .providers({ directory: run.rootDir })
+    .catch((error: unknown) => {
+      log(run, "opencode", "model preflight threw", {
+        elapsedMs: Date.now() - started,
+        error: describe(error),
+      });
+      throw error;
+    });
+  if (result.error) {
+    log(run, "opencode", "model preflight error", {
+      elapsedMs: Date.now() - started,
+      error: describe(result.error),
+    });
+    throw new Error(`opencode provider preflight failed: ${describe(result.error)}`);
+  }
+
+  const providers = result.data?.providers || [];
+  const providerIDs = providers.map((provider) => provider.id).sort();
+  for (const spec of uniqueSpecs) {
+    const provider = providers.find(
+      (candidate) => candidate.id === spec.model.providerID,
+    );
+    const modelIDs = Object.keys(provider?.models || {});
+    if (provider && modelIDs.includes(spec.model.modelID)) continue;
+
+    log(run, "opencode", "model unavailable", {
+      key: spec.key,
+      requested: modelName(spec.model),
+      availableProviders: providerIDs,
+      availableModelsForProvider: modelIDs,
+    });
+    throw new Error(
+      [
+        `opencode model unavailable: ${modelName(spec.model)}`,
+        provider
+          ? `Available models for provider "${provider.id}": ${modelIDs.join(", ") || "(none)"}`
+          : `Available providers: ${providerIDs.join(", ") || "(none)"}`,
+        `If using LLM Providers, set api key in ${shown(run.rootDir, join(run.rootDir, ".env"))} or export it before starting an external opencode server.`,
+      ].join(". "),
+    );
+  }
+
+  harness.modelsValidated = true;
+  log(run, "opencode", "model preflight done", {
+    elapsedMs: Date.now() - started,
+    models: uniqueSpecs.map((spec) => modelName(spec.model)),
+    providers: providerIDs,
+  });
 }
 
 /**

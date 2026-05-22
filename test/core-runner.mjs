@@ -500,6 +500,10 @@ async function startOpencodeServer() {
       });
       return;
     }
+    if (req.method === "GET" && req.url.startsWith("/config/providers?")) {
+      json(res, mockProviders());
+      return;
+    }
     if (req.method === "GET" && req.url.startsWith("/session/status?")) {
       json(
         res,
@@ -565,6 +569,29 @@ async function startOpencodeServer() {
     state.unexpectedRequests.push({ method: req.method, url: req.url });
     res.writeHead(404).end("not found");
   });
+}
+
+function mockProviders() {
+  const specs = [
+    process.env.SWARM_MODEL || "fake-provider/fake-model",
+    process.env.SWARM_ORCHESTRATOR_MODEL,
+    process.env.SWARM_FIXER_MODEL,
+  ].filter(Boolean);
+  const providers = new Map();
+  for (const spec of specs) {
+    const [providerID, ...rest] = spec.split("/");
+    const modelID = rest.join("/");
+    if (!providers.has(providerID)) providers.set(providerID, {});
+    providers.get(providerID)[modelID] = {
+      id: modelID,
+      providerID,
+      variants: { [process.env.SWARM_VARIANT || "test-variant"]: {} },
+    };
+  }
+  return {
+    providers: [...providers].map(([id, models]) => ({ id, models })),
+    default: {},
+  };
 }
 
 function writePromptOutputs(phase, text, outputs) {
