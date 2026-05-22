@@ -72,8 +72,10 @@ reference them by name.
   --color-info:           #003580;  --color-info-bg:    #e6ebf3;
 
   /* ---- Typography ---- */
-  --font-sans: "Helvetica Neue", Helvetica, Arial, "Liberation Sans",
-               system-ui, sans-serif;
+  --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial,
+               "Liberation Sans", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+               "Liberation Mono", monospace;
   --text-xs:   0.875rem;  /* 14px — captions, meta */
   --text-sm:   1rem;      /* 16px — UI labels, buttons, dense text */
   --text-base: 1.125rem;  /* 18px — default body copy */
@@ -121,6 +123,25 @@ reference them by name.
 > **Rule:** components reference tokens only. A literal `#003580`, `16px`, or
 > `"Helvetica"` inside a component is a bug.
 
+### Implementation rules
+
+To keep the code as consistent as the design:
+
+- **Tokens only.** Use `var(--token)` for every colour, size, space, radius,
+  and font value. A literal hex, px, rem, or font name inside a component is a
+  bug.
+- **Class naming** follows a strict block / element / modifier pattern:
+  `.block`, `.block__element`, `.block--modifier`. Lowercase, hyphenated, named
+  for role — never for appearance (`.notice--error`, never `.red-box`).
+- **Stylesheet order is fixed:** tokens, then base elements, then components,
+  then utilities. No inline styles. No `!important` beyond the `[hidden]` reset.
+- **Mobile-first.** Write base styles for the smallest screen; layer
+  complexity at the §6 breakpoints with `min-width` queries only.
+- **One component, one job.** Need a variant? Add a modifier class — never fork
+  a component or special-case it inline.
+- Ship every interactive element's full set of states together: default,
+  hover, focus-visible, active, and (only if unavoidable) disabled.
+
 ---
 
 ## 4. Colour
@@ -166,42 +187,70 @@ text (≥24px, or ≥19px bold) and for UI component boundaries.
 
 ## 5. Typography
 
-### Typeface
+### 5.1 Typefaces
 
-- **One family**: a neutral humanist sans-serif via `--font-sans`. The system
-  stack is intentional — it is fast, reliable, and unbranded, which suits an
-  official tone. Do not add a second UI typeface and do not use serifs,
-  display, or script fonts.
-- The logo wordmark is a fixed logotype (an image/SVG asset). Never recreate it
-  with live text.
+- **Primary — Inter.** Every interface text element — headings, body copy,
+  labels, buttons, navigation, captions — is set in **Inter**. It is the only
+  interface typeface.
+  - Exact declaration (the `--font-sans` token):
+    `"Inter", "Helvetica Neue", Helvetica, Arial, "Liberation Sans", system-ui, sans-serif`
+  - **Self-host** Inter as `woff2`. Do not load it from a third-party CDN — the
+    interface must render correctly offline and make no external requests.
+  - Load **exactly three weights**: Regular **400**, SemiBold **600**, Bold
+    **700**. No other weight is permitted. Do not load italic files unless a
+    genuine need for italic text exists.
+  - Every `@font-face` rule uses `font-display: swap`; preload the 400 weight.
+  - Keep the full fallback stack in the token so text stays readable before
+    Inter loads or if it is unavailable.
+- **Monospace — system stack only**, via the `--font-mono` token. Use it
+  strictly for code, logs, command output, and columns of figures. Never use
+  it for prose, headings, labels, or buttons.
+- The logo wordmark is a fixed logotype asset (SVG). Never recreate it with
+  Inter or any live font.
+- **No third typeface.** No serif, slab, display, handwriting, or decorative
+  fonts anywhere in the product.
 
-### Type scale
+### 5.2 Type scale
 
-| Element | Size | Weight | Line height | Notes |
+Use only these steps. Each row is fixed — do not invent intermediate sizes.
+
+| Role | Size token | Weight | Line height | Letter-spacing |
 |---|---|---|---|---|
-| Display / hero | `--text-3xl` | 700 | 1.25 | One per page, optional |
-| h1 | `--text-2xl` | 700 | 1.25 | Exactly one per page |
-| h2 | `--text-xl` | 700 | 1.25 | Section titles |
-| h3 | `--text-lg` | 600 | 1.3 | Sub-sections |
-| h4 | `--text-base` | 700 | 1.3 | Minor headings |
-| Body | `--text-base` | 400 | 1.6 | Default text |
-| UI / dense | `--text-sm` | 400–600 | 1.5 | Buttons, labels, controls |
-| Caption / meta | `--text-xs` | 400 | 1.5 | `--color-text-muted` |
+| Display / hero | `--text-3xl` | 700 | 1.15 | −0.02em |
+| h1 | `--text-2xl` | 700 | 1.2 | −0.02em |
+| h2 | `--text-xl` | 700 | 1.25 | −0.01em |
+| h3 | `--text-lg` | 600 | 1.3 | −0.01em |
+| h4 | `--text-base` | 700 | 1.3 | normal |
+| Body | `--text-base` | 400 | 1.6 | normal |
+| UI — buttons, labels, controls | `--text-sm` | 400 / 600 | 1.5 | normal |
+| Caption / meta | `--text-xs` | 400 | 1.5 | normal |
+| Eyebrow (uppercase label) | `--text-xs` | 700 | 1.4 | 0.06em |
 
-### Rules
+### 5.3 Rules
 
-- **Headings** use `--color-text` by default. `--color-primary` is permitted
-  for the page `h1` and major section headings — but if you use it, use it
-  consistently across the whole product.
-- Heading levels descend without skipping (`h1 → h2 → h3`). Levels reflect
-  document structure, never font size — restyle with the scale above.
-- Body copy: left-aligned, never justified. Measure (line length) capped at
-  **~70 characters** (`max-width: 70ch`).
-- Weights: only 400, 600, 700. No light or black weights. No italics except
-  genuine semantic emphasis.
-- No all-caps for sentences or buttons. Small uppercase is allowed only for
-  short eyebrow labels with letter-spacing `0.06em`.
-- Never centre paragraphs. Headings may be centred only in rare hero contexts.
+- **Weights:** only **400, 600, 700** exist — 400 for body, 600 for emphasis
+  and `h3`, 700 for headings and buttons. Never use 300, 500, 800, or 900.
+- **Letter-spacing:** tighten large headings exactly as the scale specifies;
+  body and UI text are always `normal`; the uppercase eyebrow label is the
+  only element with positive tracking (`0.06em`).
+- **Colour:** headings use `--color-text` by default; `--color-primary` is
+  permitted for the page `h1` only, and only if applied consistently
+  product-wide.
+- **Heading levels** reflect document structure and never skip
+  (`h1 → h2 → h3`). Exactly one `h1` per page. Never choose a heading level for
+  its size — restyle with the scale.
+- **Body copy** is left-aligned — never justified, never centred. Line length
+  is capped at **70 characters** (`max-width: 70ch`); lead-in/intro text at
+  **60ch**.
+- **Paragraph spacing** is `--space-4`. Separate paragraphs with real `<p>`
+  elements — never with `<br>` or blank lines.
+- **Numerals** in tables, statistics, and any aligned figures use
+  `font-variant-numeric: tabular-nums`.
+- **Minimum rendered text size** is 14px (`--text-xs`). Nothing smaller, ever.
+- **No all-caps** sentences or buttons. Uppercase is allowed only for the short
+  eyebrow label defined in the scale.
+- **No italics** except genuine semantic emphasis (`<em>`); never italicise a
+  whole paragraph or heading.
 
 ---
 
