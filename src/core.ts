@@ -790,12 +790,17 @@ function writeFinalReport(run: RunState, decision?: Decision) {
     ? readJsonObject(join(iterDir, "solver-result.json"))
     : undefined;
   const votes = iterDir ? readVoteSummaries(run, iterDir) : [];
+  const originalAxe = readJsonObject(join(run.runDir, "axe.json"));
+  const briefPath = join(run.runDir, "brief.md");
+  const briefText = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : undefined;
   const report = {
     latest,
     decision,
     checks,
     solver,
     votes,
+    originalAxe,
+    briefText,
   };
   const markdown = reportMarkdown(run, report);
   const html = reportHtml(run, report);
@@ -835,9 +840,33 @@ type ReportInputs = {
   checks?: Record<string, unknown>;
   solver?: Record<string, unknown>;
   votes: VoteSummary[];
+  originalAxe?: Record<string, unknown>;
+  briefText?: string;
 };
 
 type ReportTone = "success" | "warning" | "error" | "info";
+
+// Each row in the violations panel pairs an original axe rule with whether the
+// final checks still flag it. Empty list -> the panel is skipped entirely.
+type ViolationRow = {
+  id: string;
+  help: string;
+  wcag?: string;
+  count: number;
+  status: "fixed" | "remains";
+};
+
+// One simple card per agent. The orchestrator and fixer always render; one card
+// is added per reviewer that actually voted. summary is a short excerpt only —
+// the full reason stays on disk in votes/<id>.json for anyone who wants it.
+type AgentCard = {
+  role: "orchestrator" | "fixer" | "reviewer";
+  title: string;
+  vote?: string;
+  voteTone?: ReportTone;
+  score?: number;
+  summary: string;
+};
 
 function readVoteSummaries(run: RunState, iterDir: string): VoteSummary[] {
   return run.profile.reviewers.flatMap((reviewer) => {
@@ -865,6 +894,121 @@ function readJsonObject(file: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+// Pairs every original axe violation with whether the final checks still flag
+// it. Missing axe.json -> empty list -> caller skips the panel entirely.
+function buildViolations(report: ReportInputs): ViolationRow[] {
+  const originals = axeViolationsArray(report.originalAxe);
+  if (!originals.length) return [];
+  const remainingIds = new Set(
+    axeViolationsArray(report.checks as Record<string, unknown> | undefined)
+      .map((v) => stringValue(v.id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  return originals.flatMap((v) => {
+    const id = stringValue(v.id);
+    if (!id) return [];
+    const help = stringValue(v.help) || id;
+    const count = numberValue(v.nodeCount) ??
+      (Array.isArray(v.nodes) ? v.nodes.length : 0);
+    return [{
+      id,
+      help: compactText(help),
+      wcag: firstWcagSc(v.wcag),
+      count,
+      status: remainingIds.has(id) ? "remains" : "fixed",
+    }];
+  });
+}
+
+// axe results live under different keys on disk: `violations` in axe.json from
+// the scan, `axeViolations` in checks.json from the per-iteration validator.
+function axeViolationsArray(
+  source: Record<string, unknown> | undefined,
+): Record<string, unknown>[] {
+  const list = source?.violations ?? source?.axeViolations;
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (v): v is Record<string, unknown> =>
+      Boolean(v) && typeof v === "object" && !Array.isArray(v),
+  );
+}
+
+// Compact axe carries a wcag[] array per violation. First entry is enough for a
+// small badge in the report; the full mapping stays in axe-full.json.
+function firstWcagSc(value: unknown): string | undefined {
+  if (!Array.isArray(value) || !value.length) return undefined;
+  const first = value[0];
+  if (!first || typeof first !== "object" || Array.isArray(first)) return undefined;
+  return stringValue((first as Record<string, unknown>).sc);
+}
+
+// One card per agent that ran: orchestrator + fixer always render, plus one per
+// reviewer with a vote. Each card carries a short excerpt only; full text is
+// available via the artifact links.
+function buildAgentCards(report: ReportInputs): AgentCard[] {
+  const cards: AgentCard[] = [
+    {
+      role: "orchestrator",
+      title: "Orchestrator",
+      summary: briefHighlight(report.briefText),
+    },
+    {
+      role: "fixer",
+      title: "Fixer",
+      summary: fixerHighlight(report.solver),
+    },
+  ];
+  for (const vote of report.votes) {
+    cards.push({
+      role: "reviewer",
+      title: vote.name,
+      vote: vote.vote,
+      voteTone: voteTone(vote.vote),
+      score: vote.score,
+      summary: excerpt(vote.reason, 220),
+    });
+  }
+  return cards;
+}
+
+function briefHighlight(briefText: string | undefined): string {
+  const fallback =
+    "Wrote the run brief: page purpose, content to preserve, and reviewer focus.";
+  if (!briefText) return fallback;
+  const para = briefText
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .find((p) => p && !p.startsWith("#") && !p.startsWith("-") && p.length > 30);
+  return para ? excerpt(para, 220) : fallback;
+}
+
+function fixerHighlight(solver: Record<string, unknown> | undefined): string {
+  if (!solver) return "No fixer summary recorded.";
+  const summary = stringValue(solver.summary);
+  const fixes = stringArray(solver.accessibilityFixes);
+  if (summary && fixes.length)
+    return excerpt(`${fixes.length} ${plural(fixes.length, "fix")} applied. ${summary}`, 220);
+  if (summary) return excerpt(summary, 220);
+  if (fixes.length)
+    return excerpt(`${fixes.length} ${plural(fixes.length, "fix")} applied. ${fixes[0]}`, 220);
+  return "No fixer summary recorded.";
+}
+
+function voteTone(vote: string): ReportTone {
+  if (vote === "accept") return "success";
+  if (vote === "block") return "error";
+  if (vote === "revise") return "warning";
+  return "info";
+}
+
+// Tighter cap than compactText (360). Card bodies need to skim quickly; full
+// text is in the source artifacts linked from the Artifacts section.
+function excerpt(text: string, limit: number): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= limit) return clean;
+  return `${clean.slice(0, limit - 1)}…`;
 }
 
 function reportView(run: RunState, report: ReportInputs) {
@@ -914,6 +1058,8 @@ function reportView(run: RunState, report: ReportInputs) {
     ),
     checks: checkStatus(report.checks),
     reviewerTally: `${accepts} accept, ${blocks} block`,
+    violations: buildViolations(report),
+    agents: buildAgentCards(report),
     changeSummary,
     preservationSummary: preservation.length
       ? preservation
@@ -976,6 +1122,16 @@ function reportMarkdown(run: RunState, report: ReportInputs) {
     `- Automated checks: ${view.checks}`,
     `- Reviewer tally: ${view.reviewerTally}`,
     `- Decision reason: ${view.decisionReason}`,
+    ...(view.violations.length
+      ? [
+          "",
+          "## Violations",
+          ...view.violations.map(
+            (row) =>
+              `- ${row.id}${row.wcag ? ` (${row.wcag})` : ""}: ${row.help} — ${row.status === "fixed" ? "fixed" : "remains"} (${row.count} ${plural(row.count, "node")})`,
+          ),
+        ]
+      : []),
     "",
     "## Implementation Summary",
     ...bulletLines(view.changeSummary),
@@ -1017,12 +1173,14 @@ function reportHtml(run: RunState, report: ReportInputs) {
   const navItems = [
     { href: "#outcome", label: "Outcome" },
     { href: "#run-summary", label: "Run summary" },
-    { href: "#implementation-summary", label: "Implementation summary" },
+    ...(view.violations.length
+      ? [{ href: "#violations", label: "Violations" }]
+      : []),
+    { href: "#agents", label: "Agent breakdown" },
     { href: "#preservation", label: "Preservation and scope" },
     ...(view.removed.length
       ? [{ href: "#removed-content", label: "Removed or reworked content" }]
       : []),
-    { href: "#reviewer-votes", label: "Reviewer votes" },
     ...(view.failures.length
       ? [{ href: "#check-failures", label: "Check failures" }]
       : []),
@@ -1181,6 +1339,21 @@ function reportHtml(run: RunState, report: ReportInputs) {
     .artifact-list { display: grid; gap: var(--space-3); padding-inline-start: 0; list-style: none; }
     .artifact-list__item { border-bottom: var(--border-hairline); padding-block-end: var(--space-3); }
     .data-table { font-size: var(--text-sm); }
+    .violation-table code { background: var(--color-surface-subtle); padding: 0 var(--space-2); font-family: var(--font-mono); font-size: var(--text-xs); }
+    .violation-status { font-weight: var(--weight-bold); white-space: nowrap; }
+    .violation-status--fixed { color: var(--color-success); }
+    .violation-status--remains { color: var(--color-error); }
+    .agent-grid { display: grid; gap: var(--space-4); margin: 0; padding-inline-start: 0; list-style: none; }
+    .agent-card { border: var(--border-hairline); padding: var(--space-5); background: var(--color-surface); display: grid; gap: var(--space-3); }
+    .agent-card__header { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; justify-content: space-between; }
+    .agent-card__role { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 var(--space-1) 0; }
+    .agent-card__title { font-size: var(--text-base); font-weight: var(--weight-bold); margin: 0; }
+    .agent-card__badge { display: inline-flex; align-items: center; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); font-weight: var(--weight-bold); white-space: nowrap; }
+    .agent-card__badge--success { background: var(--color-success-bg); color: var(--color-success); }
+    .agent-card__badge--warning { background: var(--color-warning-bg); color: var(--color-warning); }
+    .agent-card__badge--error { background: var(--color-error-bg); color: var(--color-error); }
+    .agent-card__badge--info { background: var(--color-info-bg); color: var(--color-info); }
+    .agent-card__summary { margin: 0; color: var(--color-text); font-size: var(--text-sm); line-height: var(--leading-normal); }
     .muted { color: var(--color-text-muted); }
     .site-footer { background: var(--color-primary-darker); color: var(--color-text-inverse); }
     .site-footer__inner { display: grid; gap: var(--space-5); padding-block: var(--space-7); }
@@ -1195,6 +1368,10 @@ function reportHtml(run: RunState, report: ReportInputs) {
       .status-banner__meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .site-footer__inner { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+    }
+
+    @media (min-width: 768px) {
+      .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     @media (min-width: 1024px) {
@@ -1254,9 +1431,12 @@ function reportHtml(run: RunState, report: ReportInputs) {
         </dl>
       </section>
 
-      <section class="content-block" id="implementation-summary" aria-labelledby="implementation-summary-title">
-        <h2 id="implementation-summary-title">Implementation summary</h2>
-        ${htmlList(view.changeSummary)}
+      ${violationsSection(view.violations)}
+
+      <section class="content-block" id="agents" aria-labelledby="agents-title">
+        <h2 id="agents-title">Agent breakdown</h2>
+        <p class="muted">What each agent in the swarm contributed during the final iteration.</p>
+        ${agentCardsHtml(view.agents)}
       </section>
 
       <section class="content-block" id="preservation" aria-labelledby="preservation-title">
@@ -1265,11 +1445,6 @@ function reportHtml(run: RunState, report: ReportInputs) {
       </section>
 
       ${removedSection}
-
-      <section class="content-block" id="reviewer-votes" aria-labelledby="reviewer-votes-title">
-        <h2 id="reviewer-votes-title">Reviewer votes</h2>
-        ${reviewerVotesHtml(view.votes)}
-      </section>
 
       ${failuresSection}
 
@@ -1312,22 +1487,51 @@ function htmlList(items: string[]) {
         </ul>`;
 }
 
-function reviewerVotesHtml(votes: VoteSummary[]) {
-  if (!votes.length)
-    return `<p class="muted">No reviewer votes were recorded for the final iteration.</p>`;
-  return `<table class="data-table">
+// Violations panel: skipped when the run produced no original axe.json or it
+// had zero violations. Otherwise one row per original rule, tagged FIXED or
+// REMAINS based on whether the final checks still flag it.
+function violationsSection(rows: ViolationRow[]) {
+  if (!rows.length) return "";
+  const fixed = rows.filter((row) => row.status === "fixed").length;
+  return `<section class="content-block" id="violations" aria-labelledby="violations-title">
+        <h2 id="violations-title">Violations</h2>
+        <p class="muted">${fixed} of ${rows.length} original axe ${plural(rows.length, "violation")} resolved.</p>
+        <table class="data-table violation-table">
           <thead>
             <tr>
-              <th scope="col">Reviewer</th>
-              <th scope="col">Vote</th>
-              <th scope="col">Score</th>
-              <th scope="col">Reason</th>
+              <th scope="col">Rule</th>
+              <th scope="col">WCAG</th>
+              <th scope="col">Affected</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>
-            ${votes.map((vote) => `<tr><th scope="row">${escapeHtml(compactText(vote.name))}</th><td>${escapeHtml(humanize(compactText(vote.vote)))}</td><td>${vote.score === undefined ? "Not scored" : escapeHtml(String(vote.score))}</td><td>${escapeHtml(compactText(vote.reason))}</td></tr>`).join("\n            ")}
+            ${rows.map((row) => violationRow(row)).join("\n            ")}
           </tbody>
-        </table>`;
+        </table>
+      </section>`;
+}
+
+function violationRow(row: ViolationRow) {
+  const status = row.status === "fixed" ? "Fixed" : "Remains";
+  return `<tr><th scope="row"><code>${escapeHtml(row.id)}</code> <span class="muted">${escapeHtml(row.help)}</span></th><td>${escapeHtml(row.wcag || "—")}</td><td>${row.count}</td><td class="violation-status violation-status--${row.status}">${status}</td></tr>`;
+}
+
+// Agent cards: predictable list of small cards in a grid. Each is just title +
+// optional vote badge + a short summary excerpt. Full text stays on disk.
+function agentCardsHtml(cards: AgentCard[]) {
+  if (!cards.length)
+    return `<p class="muted">No agent activity was recorded for the final iteration.</p>`;
+  return `<ul class="agent-grid">
+          ${cards.map((card) => agentCardHtml(card)).join("\n          ")}
+        </ul>`;
+}
+
+function agentCardHtml(card: AgentCard) {
+  const badge = card.vote
+    ? `<span class="agent-card__badge agent-card__badge--${card.voteTone || "info"}">${escapeHtml(humanize(card.vote))}${card.score === undefined ? "" : ` · ${card.score}`}</span>`
+    : "";
+  return `<li class="agent-card"><div class="agent-card__header"><div><p class="agent-card__role">${escapeHtml(humanize(card.role))}</p><p class="agent-card__title">${escapeHtml(compactText(card.title))}</p></div>${badge}</div><p class="agent-card__summary">${escapeHtml(card.summary)}</p></li>`;
 }
 
 function humanize(value: string) {
