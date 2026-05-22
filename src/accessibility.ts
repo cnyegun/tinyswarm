@@ -12,8 +12,11 @@ import { chromium, type Page } from "playwright";
 import type {
   CheckResult,
   Decision,
+  IterationPaths,
   SwarmProfile,
 } from "./core.js";
+import { EnergyMeter } from "./energy.js";
+import { parseFinding, type ParsedFinding, type ScoredFinding } from "./aggregate.js";
 
 type Facts = {
   title: string;
@@ -85,6 +88,228 @@ const TARGETED_EVIDENCE =
 const COMPACT_OUTPUT =
   "Keep outputs compact and deduplicated. Reference finding ids, axe ids, and short element labels; keep evidence snippets brief and do not paste raw HTML, full axe nodes, or long repeated file excerpts.";
 
+// Static cacheable system prompt — sent once per LLM session as the system message.
+const FIX_SYSTEM_PROMPT = `\
+You are a targeted HTML accessibility fixer. \
+Apply the minimum necessary changes to fix the listed findings without touching unrelated code.
+
+## Output format
+
+Respond with exactly one JSON object — no markdown fences, no text outside the JSON.
+
+{
+  "patches": [
+    {
+      "findingId": "string  — the finding ID from the input (e.g. \\"semantic-1\\")",
+      "search":    "string  — verbatim substring of the HTML that appears EXACTLY ONCE",
+      "replace":   "string  — the replacement text",
+      "rationale": "string  — one sentence: what changed and why"
+    }
+  ],
+  "summary":  "string  — 2–3 sentences summarising everything that was fixed",
+  "unfixed":  ["string — \\"findingId: reason\\" for findings that could not be safely fixed"]
+}
+
+The \`unfixed\` field is optional; omit it if all findings were fixed.
+
+## How SEARCH/REPLACE works
+
+\`search\` must be a **verbatim substring** of the current HTML (exact characters, including whitespace).
+It must appear **exactly once** in the file — zero matches or two-plus matches both reject the whole patch set.
+If the snippet is not unique, extend it by 1–3 surrounding context lines until it is.
+
+Textual illustration only — NOT the output format:
+
+<<<<<<< SEARCH
+<img src="hero.jpg">
+=======
+<img src="hero.jpg" alt="Team members collaborating around a whiteboard">
+>>>>>>> REPLACE
+
+Equivalent JSON patch you MUST produce:
+
+{
+  "findingId": "semantic-1",
+  "search":    "<img src=\\"hero.jpg\\">",
+  "replace":   "<img src=\\"hero.jpg\\" alt=\\"Team members collaborating around a whiteboard\\">",
+  "rationale": "Image lacked alt text; added descriptive equivalent per WCAG 1.1.1."
+}
+
+## Hard constraints
+
+- Do NOT touch any HTML outside the specific elements named in the listed findings. \
+Touching unrelated code = patch REJECTED.
+- Preserve all href values, image src attributes, visible text, brand elements, and document \
+structure unless a finding explicitly requires changing them.
+- Color/contrast fixes must repair the full computed color pair (foreground + background \
+together); do not change a single utility token in isolation.
+- Maximum 8 patches per response.
+- If you cannot construct a unique, unambiguous \`search\` string for a finding, add it to \
+\`unfixed\` with a reason. Do not guess.`;
+
+// ---------------------------------------------------------------------------
+// Fixer prompt helpers
+// ---------------------------------------------------------------------------
+
+function loadAndParseFindings(iterDir: string): ParsedFinding[] {
+  const all: ParsedFinding[] = [];
+  for (const reviewer of reviewers) {
+    const file = join(iterDir, "findings", `${reviewer.id}.json`);
+    if (!existsSync(file)) continue;
+    try {
+      const data = JSON.parse(readFileSync(file, "utf8")) as { findings?: unknown };
+      if (!Array.isArray(data.findings)) continue;
+      for (const raw of data.findings) {
+        if (typeof raw === "string" && raw.trim()) all.push(parseFinding(raw, reviewer.id));
+      }
+    } catch { /* ignore */ }
+  }
+  return all;
+}
+
+function htmlSearchTerms(location: string): string[] {
+  const terms: string[] = [];
+  const loc = location.trim();
+  const idM = loc.match(/#([a-zA-Z0-9_-]+)/);
+  if (idM) terms.push(`id="${idM[1]}"`, `id='${idM[1]}'`);
+  const clsM = loc.match(/\.([a-zA-Z0-9_-]+)/);
+  if (clsM) terms.push(clsM[1]);
+  const tagM = loc.match(/^(img|button|nav|main|header|footer|h[1-6]|input|select|textarea|form|a)\b/i);
+  if (tagM) terms.push(`<${tagM[1].toLowerCase()}`);
+  for (const m of loc.matchAll(/['"]([^'"]{4,40})['"]/g)) terms.push(m[1]);
+  return [...new Set(terms)].filter(Boolean);
+}
+
+function extractHtmlSnippetForFinding(lines: string[], finding: ParsedFinding, ctx = 20): string | null {
+  const candidates = [
+    ...(finding.location ? htmlSearchTerms(finding.location) : []),
+    ...(finding.evidence ? [finding.evidence.slice(0, 60)] : []),
+  ];
+  for (const term of candidates) {
+    const lo = term.toLowerCase();
+    const idx = lines.findIndex((l) => l.toLowerCase().includes(lo));
+    if (idx === -1) continue;
+    const start = Math.max(0, idx - Math.floor(ctx / 3));
+    return lines.slice(start, Math.min(lines.length, start + ctx)).join("\n");
+  }
+  return null;
+}
+
+function buildSnippetsForFindings(runDir: string, findings: ParsedFinding[]): Record<string, string> {
+  const htmlPath = existsSync(join(runDir, "transformed.html"))
+    ? join(runDir, "transformed.html")
+    : join(runDir, "original.html");
+  let htmlLines: string[] = [];
+  try { if (existsSync(htmlPath)) htmlLines = readFileSync(htmlPath, "utf8").split("\n"); } catch { /* ignore */ }
+
+  const snippets: Record<string, string> = {};
+  for (const f of findings) {
+    if (!f.id) continue;
+    const s = extractHtmlSnippetForFinding(htmlLines, f);
+    if (s) snippets[f.id] = s;
+  }
+  return snippets;
+}
+
+function readAggregateSummary(iterDir: string): string {
+  const aggPath = join(iterDir, "aggregate-feedback.json");
+  if (!existsSync(aggPath)) return "";
+  try {
+    const agg = JSON.parse(readFileSync(aggPath, "utf8")) as { summary?: unknown };
+    return typeof agg.summary === "string" ? agg.summary : "";
+  } catch { return ""; }
+}
+
+function loadFixContext(iterCtx: IterationPaths): {
+  findings: ParsedFinding[];
+  snippets: Record<string, string>;
+  aggregateSummary: string;
+  total: number;
+} {
+  const SW: Record<string, number> = { high: 3, medium: 2, low: 1 };
+  const findings = loadAndParseFindings(iterCtx.iterDir)
+    .sort((a, b) => (SW[b.severity ?? "low"] ?? 0) - (SW[a.severity ?? "low"] ?? 0));
+  return {
+    findings,
+    snippets: buildSnippetsForFindings(iterCtx.runDir, findings.slice(0, 5)),
+    aggregateSummary: readAggregateSummary(iterCtx.iterDir),
+    total: findings.length,
+  };
+}
+
+/**
+ * Build the per-call user prompt for the fixer LLM.
+ * Accepts a pre-loaded chunk of findings (≤5) and their HTML snippets.
+ * T2.3 calls this in a loop over chunks; the `fixPrompt` method calls it once
+ * with the top-priority slice until the chunked loop is wired.
+ */
+export function buildFixUserPrompt(
+  findings: ParsedFinding[],
+  htmlSnippets: Record<string, string>,
+  opts: {
+    iteration: number;
+    totalFindings: number;
+    aggregateSummary?: string;
+    /** First N chars of the full HTML file — included when structural findings have no element snippet. */
+    htmlHead?: string;
+  },
+): string {
+  const { iteration, totalFindings, aggregateSummary, htmlHead } = opts;
+
+  const hdr =
+    `## Iteration ${iteration} — fix ${findings.length} finding${findings.length === 1 ? "" : "s"}` +
+    (totalFindings > findings.length
+      ? ` (${totalFindings} total; highest-priority ${findings.length} in this call)`
+      : "");
+
+  const summaryBlk = aggregateSummary ? `\n## Aggregate summary\n\n${aggregateSummary}` : "";
+
+  const findingsBlk = findings.length === 0
+    ? "(no structured findings available)"
+    : findings.map((f) => {
+        const id = f.id ?? "?";
+        const lines = [
+          `### Finding ${id}  [${f.severity ?? "?"} · ${f.category ?? "?"}]`,
+          `Location: ${f.location ?? "(unknown)"}`,
+          `Issue: ${f.issue ?? f.raw}`,
+          `Suggested fix: ${f.suggestedFix ?? "(see solver-task.md)"}`,
+        ];
+        const snippet = htmlSnippets[id];
+        if (snippet) lines.push(`\nRelevant HTML:\n\`\`\`html\n${snippet}\n\`\`\``);
+        return lines.join("\n");
+      }).join("\n\n");
+
+  // Include a structural head excerpt when any finding has no element snippet.
+  // Structural findings (missing <main>, missing skip-link) need to see the
+  // document structure to anchor a valid search string in the full HTML file.
+  const missingSnippets = findings.filter((f) => f.id && !htmlSnippets[f.id]);
+  const structuralBlk =
+    htmlHead && missingSnippets.length > 0
+      ? `\n## Document structure (for findings without element excerpts)\n\n` +
+        `The following findings have no element-level excerpt. Use the HTML below to\n` +
+        `construct a \`search\` string that appears **exactly once** in the full file.\n\n` +
+        `\`\`\`html\n${htmlHead}\n\`\`\``
+      : "";
+
+  return [
+    hdr,
+    summaryBlk,
+    "",
+    "## Findings",
+    "",
+    findingsBlk,
+    structuralBlk,
+    "",
+    "## Instructions",
+    "",
+    "Produce a JSON response. Each patch's `search` value must appear **exactly once** in the **full HTML file** being patched (not only in the excerpts shown above).",
+    "If a finding's location cannot be uniquely matched, add it to `unfixed` with a reason.",
+    "Maximum 8 patches total.",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+
 function fileList(paths: string[]) {
   return paths.map((path) => `- ${path}`).join("\n");
 }
@@ -93,291 +318,223 @@ function previousIterationDir(runDir: string, iteration: number) {
   return join(runDir, "iterations", String(iteration - 1).padStart(3, "0"));
 }
 
+/** Extract finding IDs from the previous iteration's aggregate-feedback.json priorities. */
+function loadPriorFindingIds(runDir: string, iteration: number): string[] {
+  if (iteration <= 1) return [];
+  const aggPath = join(previousIterationDir(runDir, iteration), "aggregate-feedback.json");
+  if (!existsSync(aggPath)) return [];
+  try {
+    const agg = JSON.parse(readFileSync(aggPath, "utf8")) as { priorities?: unknown[] };
+    if (!Array.isArray(agg.priorities)) return [];
+    const ids: string[] = [];
+    for (const p of agg.priorities) {
+      if (typeof p !== "string") continue;
+      const m = p.match(/(?:^|\s)id=([^\s|]+)/);
+      if (m) ids.push(m[1]);
+    }
+    return ids;
+  } catch { return []; }
+}
+
 export const accessibilityProfile: SwarmProfile = {
   id: "accessibility",
   artifact: "transformed.html",
   reviewers,
   scan,
   check,
-  briefPrompt: ({
-    runDir,
-  }) => `You are the swarm orchestrator for an accessibility remediation run. Use the available source page evidence to write a practical, preservation-focused accessibility brief for specialist reviewers and the fixer.
+  manualBaseline: () => EnergyMeter.accessibilityAuditBaseline(4.5),
+  briefPrompt: ({ runDir }) => ({
+    system:
+      `You are the swarm orchestrator for an accessibility remediation run. ` +
+      `Return your entire response as a single JSON object: {"markdown": "<your full markdown content>"}. ` +
+      `Place all markdown in the markdown field with \\n for line breaks. ` +
+      `Use WCAG 2.2, WAI Easy Checks, WAI-ARIA Authoring Practices, WebAIM-style pragmatic testing, ` +
+      `Inclusive Design Principles, and accessibility usability guidance as references. ` +
+      `Treat axe as useful evidence, not a complete evaluation. ` +
+      `Be evidence-based. If something is uncertain, mark it as uncertain. No markdown fences outside the JSON field.`,
+    user:
+      `Write a practical, preservation-focused accessibility brief for specialist reviewers and the fixer.\n\n` +
+      `Run directory: ${runDir}\n` +
+      `Available files:\n` +
+      fileList([
+        `${join(runDir, "original.html")} (targeted inspection only)`,
+        join(runDir, "facts.json"),
+        join(runDir, "axe.json"),
+        `${join(runDir, "axe-full.json")} (targeted debugging only after compact axe id/target lacks detail)`,
+      ]) +
+      `\n\n${TARGETED_EVIDENCE} Prefer facts.json and compact axe evidence before targeted original.html inspection.\n\n` +
+      `Write brief.md with these sections:\n` +
+      `- Page purpose and user tasks: infer the actual purpose from facts.json and targeted original snippets without inventing a new campaign, event, product, or organization.\n` +
+      `- Preservation inventory: list concrete brand/signature elements, section order, copy themes, CTAs, links, image/logo assets, schedule details, judging criteria, sponsor/partner information, and any unique visual tone that must survive remediation.\n` +
+      `- Allowed removals: only identify content that may be removed if evidence supports it, such as a Lovable badge, duplicated decorative clutter, inaccessible duplicate controls with an accessible equivalent, or empty generated wrappers. Do not authorize removal of substantive content.\n` +
+      `- Initial accessibility evidence: summarize axe violations by id and affected area, plus likely semantic, keyboard, cognitive, and visual risks that need human review.\n` +
+      `- Reviewer focus: assign category-specific criteria. Screen-reader/semantic reviewers should check names, roles, landmarks, heading hierarchy, text alternatives, language, reading order, and link purpose. Keyboard reviewers should check focus order, activation, traps, visible focus, target size, skip/bypass needs, and pointer-only behavior. Cognitive reviewers should check task clarity, CTA meaning, form/instruction clarity, content simplification risks, and whether original information remains understandable. Visual reviewers should check contrast, reflow, zoom, spacing, responsive behavior, non-text contrast, focus appearance, and mobile overflow.\n` +
+      `- Acceptance bar: passing automated checks is required but not sufficient. Acceptable remediation must improve accessibility while preserving the original page identity and materially all user-relevant content.\n\n` +
+      `${COMPACT_OUTPUT}`,
+  }),
+  findingsPrompt: ({ runDir, iterDir, iteration }, reviewer) => ({
+    system:
+      `You are an expert web accessibility reviewer. Role: ${reviewer.id} — ${reviewer.name}.\n` +
+      `You have NO filesystem access. Respond ONLY with a JSON object — no markdown, no explanation.\n\n` +
+      `## Output format\n` +
+      `{"role":"${reviewer.id}","findings":["id=${reviewer.id}-1 | category=semantic|keyboard|cognitive|visual|preservation|automated | severity=high|medium|low | confidence=high|medium|low | location=<element/section> | evidence=<observable fact> | issue=<user impact> | suggestedFix=<faithful remediation>"],"risk":"high"}\n` +
+      `Empty findings → {"role":"${reviewer.id}","findings":[],"risk":"low"}\n\n` +
+      `## Your specialist focus\n${roleCriteria[reviewer.id] || reviewer.name}\n\n` +
+      `## Severity model\n` +
+      `- high: blocks key tasks, drops important original content, creates an inaccessible control/path, causes a serious WCAG failure, or substantially flattens brand/content into a generic page.\n` +
+      `- medium: likely impairs comprehension, navigation, reading order, link purpose, focus visibility, contrast, zoom/reflow, or content preservation but has a workaround.\n` +
+      `- low: minor polish, ambiguous improvement, or advisory issue with limited user impact.\n\n` +
+      `## Confidence calibration\n` +
+      `- high: you can cite the exact element text/href/id from facts.json AND the WCAG criterion is directly violated.\n` +
+      `- medium: evidence is computed (style, layout, ARIA) OR the impact requires user context to fully assess.\n` +
+      `- low: heuristic-based judgment, no specific element citation, or advisory polish.\n` +
+      `Pick conservatively. low > hallucinated high.\n\n` +
+      `## Hard constraints\n` +
+      `Ground every finding in observable evidence. Cite concrete element text, heading text, link text/href, image src/alt, section names, axe violation ids/nodes, or before/after differences.\n` +
+      `Do not hallucinate failures. If you cannot locate the affected content, do not report it as a finding.\n` +
+      `Do not edit transformed.html. JSON only.`,
+    user:
+      `## Iteration ${iteration} — ${reviewer.name} findings\n\n` +
+      `Run directory: ${runDir}\n\n` +
+      (iteration === 1
+        ? `## Available evidence\n` +
+          fileList([
+            join(runDir, "brief.md"),
+            join(runDir, "facts.json"),
+            join(runDir, "axe.json"),
+            `${join(runDir, "transformed.html")} (if present)`,
+            `${join(iterDir, "checks.json")} (if present)`,
+          ]) +
+          `\nUse ${join(runDir, "original.html")} or ${join(runDir, "axe-full.json")} only for targeted verification when compact evidence is insufficient for a named id/target.`
+        : `## Available evidence\n` +
+          fileList([
+            `${join(previousIterationDir(runDir, iteration), "previousFindings.compact.json")} (prior iteration findings — id, category, severity, snippet)`,
+            `${join(previousIterationDir(runDir, iteration), "checks.json")} (prior compact axe checks)`,
+            join(runDir, "brief.md"),
+            join(runDir, "facts.json"),
+            join(runDir, "axe.json"),
+          ]) +
+          `\nUse ${join(runDir, "transformed.html")} only for targeted element verification after citing a specific prior finding id or element.\n` +
+          `Use ${join(previousIterationDir(runDir, iteration), "checks-full.json")} only for targeted debugging after citing a compact check id/target.\n\n` +
+          `## Delta focus\n` +
+          `Focus your review on the delta from the prior iteration. Identify:\n` +
+          `(a) Prior findings that are now fixed — cite their id from previousFindings.compact.json.\n` +
+          `(b) Prior findings that are still present — cite id and note why the fix was incomplete.\n` +
+          `(c) New findings introduced this iteration that are NOT in previousFindings.compact.json.\n` +
+          `Do not re-report findings already listed in previousFindings.compact.json unless their status has changed (regression or fix).`) +
+      `\n\n${TARGETED_EVIDENCE}\n\n${COMPACT_OUTPUT}`,
+  }),
+  fixPrompt: (ctx, chunk) => {
+    let findings: ParsedFinding[];
+    let snippets: Record<string, string>;
+    let aggregateSummary: string;
+    let total: number;
 
-Run directory: ${runDir}
-Available files:
-${fileList([
-  `${join(runDir, "original.html")} (targeted inspection only)`,
-  join(runDir, "facts.json"),
-  join(runDir, "axe.json"),
-  `${join(runDir, "axe-full.json")} (targeted debugging only after compact axe id/target lacks detail)`,
-])}
+    if (chunk && chunk.length > 0) {
+      findings = chunk;
+      snippets = buildSnippetsForFindings(ctx.runDir, chunk);
+      aggregateSummary = readAggregateSummary(ctx.iterDir);
+      total = chunk.length;
+    } else {
+      ({ findings, snippets, aggregateSummary, total } = loadFixContext(ctx));
+      findings = findings.slice(0, 5);
+    }
 
-${TARGETED_EVIDENCE} Prefer facts.json and compact axe evidence before targeted original.html inspection.
+    // For structural findings that produced no element snippet, pass the first
+    // 6000 chars of the HTML so the LLM can anchor valid search strings.
+    const hasMissingSnippets = findings.some((f) => f.id && !snippets[f.id]);
+    let htmlHead: string | undefined;
+    if (hasMissingSnippets) {
+      const htmlPath = existsSync(join(ctx.runDir, "transformed.html"))
+        ? join(ctx.runDir, "transformed.html")
+        : join(ctx.runDir, "original.html");
+      try {
+        htmlHead = readFileSync(htmlPath, "utf8").slice(0, 6000);
+      } catch { /* leave undefined */ }
+    }
 
-Output: ${join(runDir, "brief.md")}
-
-Use WCAG 2.2, WAI Easy Checks, WAI-ARIA Authoring Practices, WebAIM-style pragmatic testing, Inclusive Design Principles, and accessibility usability guidance as references. Treat axe as useful evidence, not a complete evaluation.
-
-Write brief.md with these sections:
-- Page purpose and user tasks: infer the actual purpose from facts.json and targeted original snippets without inventing a new campaign, event, product, or organization.
-- Preservation inventory: list concrete brand/signature elements, section order, copy themes, CTAs, links, image/logo assets, schedule details, judging criteria, sponsor/partner information, and any unique visual tone that must survive remediation.
-- Allowed removals: only identify content that may be removed if evidence supports it, such as a Lovable badge, duplicated decorative clutter, inaccessible duplicate controls with an accessible equivalent, or empty generated wrappers. Do not authorize removal of substantive content.
-- Initial accessibility evidence: summarize axe violations by id and affected area, plus likely semantic, keyboard, cognitive, and visual risks that need human review.
-- Reviewer focus: assign category-specific criteria. Screen-reader/semantic reviewers should check names, roles, landmarks, heading hierarchy, text alternatives, language, reading order, and link purpose. Keyboard reviewers should check focus order, activation, traps, visible focus, target size, skip/bypass needs, and pointer-only behavior. Cognitive reviewers should check task clarity, CTA meaning, form/instruction clarity, content simplification risks, and whether original information remains understandable. Visual reviewers should check contrast, reflow, zoom, spacing, responsive behavior, non-text contrast, focus appearance, and mobile overflow.
-- Acceptance bar: passing automated checks is required but not sufficient. Acceptable remediation must improve accessibility while preserving the original page identity and materially all user-relevant content.
-
-${COMPACT_OUTPUT}
-
-Be evidence-based. If something is uncertain, mark it as uncertain rather than turning it into a requirement. Write only files inside the run directory.`,
-  findingsPrompt: (
-    { runDir, iterDir, iteration },
-    reviewer,
-  ) => `You are the ${reviewer.name}. Review iteration ${iteration} as a specialist accessibility detector. Your job is to produce specific, evidence-based findings, not generic advice.
-
-Run directory: ${runDir}
-${
-  iteration === 1
-    ? `Available files:
-${fileList([
-  join(runDir, "brief.md"),
-  join(runDir, "facts.json"),
-  join(runDir, "axe.json"),
-  `${join(runDir, "transformed.html")} (if present)`,
-  `${join(iterDir, "checks.json")} (if present)`,
-])}
-Use ${join(runDir, "original.html")} or ${join(runDir, "axe-full.json")} only for targeted verification when compact evidence is insufficient for a named id/target.`
-    : `Use source evidence already in this reviewer session; do not re-load unchanged source artifacts wholesale.
-Available current and latest prior files:
-${fileList([
-  join(runDir, "transformed.html"),
-  `${join(previousIterationDir(runDir, iteration), "checks.json")} (latest prior compact checks)`,
-  `${join(previousIterationDir(runDir, iteration), "aggregate-feedback.json")} (latest prior summary, if needed)`,
-  `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest prior solver notes, if needed)`,
-])}
-Use ${join(previousIterationDir(runDir, iteration), "checks-full.json")} only for targeted debugging after citing a compact check id/target that lacks enough element detail.`
-}
-${TARGETED_EVIDENCE}
-Output: ${join(iterDir, "findings", `${reviewer.id}.json`)}
-
-Ground every finding in observable evidence from the files. Cite concrete element text, heading text, link text/href, image src/alt, section names, axe violation ids/nodes, or before/after differences. Do not hallucinate failures. If you cannot locate the affected content, do not report it as a finding.
-
-Use this severity model when deciding risk:
-- high: blocks key tasks, drops important original content, creates an inaccessible control/path, causes a serious WCAG failure, or substantially flattens brand/content into a generic page.
-- medium: likely impairs comprehension, navigation, reading order, link purpose, focus visibility, contrast, zoom/reflow, or content preservation but has a workaround.
-- low: minor polish, ambiguous improvement, or advisory issue with limited user impact.
-
-Your role criteria: ${roleCriteria[reviewer.id] || "use the role described above."}
-
-When transformed.html exists, compare it against compact source evidence, targeted original snippets, brief.md, and the preservation inventory. Flag regressions if important copy, CTAs, links, logos/images, schedule details, judging criteria, partner information, or brand feel were lost without accessibility justification. Passing axe does not excuse these regressions.
-
-Prefer typed findings in the findings array using compact strings with this pattern: id=<role>-N | category=<semantic|keyboard|cognitive|visual|preservation|automated> | severity=<low|medium|high> | confidence=<low|medium|high> | location=<specific element/section/text> | evidence=<observable fact> | issue=<user impact> | suggestedFix=<faithful remediation>. The JSON contract still requires findings to be an array of strings, so keep each record as one string.
-
-If no issue is proven, use an empty findings array and risk low. Do not edit transformed.html.
-
-Write exactly this JSON shape:
-{ "role": "${reviewer.id}", "findings": ["id=${reviewer.id}-1 | category=... | severity=... | confidence=... | location=... | evidence=... | issue=... | suggestedFix=..."], "risk": "low" | "medium" | "high" }`,
-  aggregatePrompt: ({
-    runDir,
-    iterDir,
-    iteration,
-  }) => `You are the swarm orchestrator. Aggregate specialist findings for iteration ${iteration} into an evidence-first remediation task. Normalize, deduplicate, and prioritize; do not invent issues that reviewers did not support with evidence.
-
-Run directory: ${runDir}
-Use source evidence and brief already in this orchestrator session; do not re-load unchanged source artifacts wholesale.
-Available current files:
-${fileList([
-  `${join(iterDir, "findings")}/*.json`,
-  join(runDir, "transformed.html"),
-  ...(iteration > 1
-    ? [
-        `${join(previousIterationDir(runDir, iteration), "aggregate-feedback.json")} (latest prior summary, if needed)`,
-        `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest prior solver notes, if needed)`,
-        `${join(previousIterationDir(runDir, iteration), "checks.json")} (latest prior checks, if needed)`,
-      ]
-    : []),
-])}
-Inspect only targeted snippets needed to resolve supported findings. Use latest prior iteration artifacts by default; inspect older iterations only to resolve a named regression or decision conflict.
-Outputs:
-- ${join(iterDir, "aggregate-feedback.json")}
-- ${join(iterDir, "solver-task.md")}
-
-aggregate-feedback.json must remain compatible with this shape:
-{ "summary": "string", "priorities": ["short task"], "risks": ["short risk"] }
-Keep summary to three sentences or fewer, priorities to the high-signal top eight, and risks to the high-signal top six. Reference evidence ids, severity, confidence, category, source reviewer, affected original/transformed content, and whether the item is a must-fix, should-fix, preservation guardrail, or residual risk; do not restate full evidence unless a short quote is necessary.
-
-Build a score-driven priority order:
-- Critical preservation regressions and blocked key tasks outrank cosmetic accessibility tweaks.
-- Axe violations and deterministic check failures are must-fix, but automated pass is not enough.
-- Semantic and usability findings need evidence and confidence. Do not let a low-confidence hallucinated finding drive destructive changes.
-- If the current transformed.html is worse than the source evidence because it dropped content or became a generic landing page, instruct the fixer to restore affected sections from targeted original snippets, then remediate narrowly.
-
-solver-task.md should tell the fixer exactly what to change and what not to change. Include these sections:
-- Objective: faithful accessibility remediation of the original page, not a generic replacement.
-- Source of truth: compact source evidence, targeted original/transformed snippets, brief.md, and this aggregate feedback.
-- Preservation requirements: preserve original brand feel, section order, substantive copy, CTAs, link destinations/text meaning, images/logos unless decorative, schedule details, judging criteria, partner/sponsor information, and any distinctive visual language unless accessibility requires a targeted adjustment.
-- Allowed removals: only the Lovable badge, purely decorative duplicated content, empty wrappers, or duplicate inaccessible controls when an accessible equivalent remains. Require a short justification for each removal.
-- Must-fix accessibility items: list each supported issue with evidence ids or short evidence, affected element/section, user impact, and acceptance criteria.
-- Faithful remediation constraints: prefer semantic HTML, corrected names/labels/alt text, contrast/focus/reflow CSS, and small structural repairs over wholesale redesign. Do not replace the page with a generic hero/features/testimonials/contact template. Do not rewrite CTAs into vague labels. Do not drop links or images to make axe pass.
-- Color/theme repair guardrail: treat background, foreground, muted, accent, link, and CTA/button colors as a paired system. If a task changes dark/light background utilities, also require matching foreground utilities, slash-opacity variants, bg-background opacity variants, body background, and default anchor/CTA colors so computed contrast passes. Do not accept token-name fixes without computed foreground/background contrast evidence.
-- Acceptance criteria: valid standalone HTML, title, exactly one h1, main landmark, no axe violations, no mobile horizontal overflow, visible focus styles, responsive layout, improved accessibility score, preserved key content and identity, no unsupported removals.
-- Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, preservationNotes, removedContent, and residualRisks if useful, while remaining simple compact JSON.
-
-${COMPACT_OUTPUT}
-
-Write only these files.`,
-  fixPrompt: ({
-    runDir,
-    iterDir,
-    iteration,
-  }) => `You are the fixer. Apply solver-task.md for iteration ${iteration}. Your output must be a faithful accessibility remediation of the original page, not a generic replacement landing page.
-
-Run directory: ${runDir}
-${
-  iteration === 1
-    ? `Available files:
-${fileList([
-  `${join(runDir, "original.html")} (implementation base only if no faithful transformed.html exists; otherwise targeted inspection)`,
-  join(runDir, "facts.json"),
-  join(runDir, "axe.json"),
-  `${join(runDir, "axe-full.json")} (targeted debugging only after compact axe id/target lacks detail)`,
-  join(runDir, "brief.md"),
-  join(iterDir, "aggregate-feedback.json"),
-  join(iterDir, "solver-task.md"),
-])}
-Inspect only the source snippets needed to preserve and repair the page. The fixer is the only role allowed to load/copy original.html wholesale, and only once as the implementation base when no faithful transformed.html exists; never copy raw HTML into notes or summaries.`
-    : `Use unchanged source evidence already in this fixer session; do not re-load unchanged source artifacts wholesale.
-Available current files:
-${fileList([
-  join(iterDir, "aggregate-feedback.json"),
-  join(iterDir, "solver-task.md"),
-  `${join(runDir, "transformed.html")} (targeted inspection only)`,
-])}`
-}
-${TARGETED_EVIDENCE}
-Outputs:
-- ${join(runDir, "transformed.html")}
-- ${join(iterDir, "solver-result.json")}
-
-Hard constraints:
-- Produce valid standalone HTML in transformed.html.
-- Keep the original page purpose, brand feel, visual tone, section order, substantive copy, CTAs, links, images/logos, schedule details, judging criteria, partner/sponsor information, and other user-relevant details unless solver-task.md identifies an accessibility reason to change them.
-- Do not create a generic hero/features/testimonials/contact page. Do not replace specific event or organization content with vague marketing filler. Do not invent new dates, sponsors, judging criteria, links, or claims.
-- Only remove the Lovable badge, purely decorative duplicated content, empty wrappers, or duplicate inaccessible controls when an accessible equivalent remains and the removal is justified in solver-result.json.
-- Passing axe is required but not sufficient. Also preserve content and improve human accessibility.
-- Color fixes must repair the whole computed color system, not a single class. If restoring or changing backgrounds, also verify and fix body/html background, text-foreground, text-foreground slash-opacity variants, text-muted-foreground, accent text, bg-background slash-opacity variants, default anchors, and CTA/button foreground/background colors.
-
-Required accessibility baseline:
-- Meaningful title, page language when known, exactly one h1, main landmark, sensible landmarks/sections, logical heading hierarchy, and DOM order matching visual/reading order.
-- Accessible names for links, buttons, controls, and images. Link and CTA text must remain specific enough to convey purpose in context. Alt text must be equivalent in context; decorative images need empty alt, not fabricated descriptions.
-- Keyboard operability for every interactive element, no keyboard traps, logical focus order, visible focus indicator with sufficient contrast, and no pointer-only behavior.
-- Sufficient color contrast for text and meaningful graphics, no reliance on color alone, responsive layout without mobile horizontal overflow, and reflow/zoom-friendly spacing.
-- Use native HTML before ARIA. If ARIA is needed, follow WAI-ARIA Authoring Practices for roles, states, properties, names, keyboard behavior, and landmarks.
-
-Implementation guidance:
-- Start from the best prior transformed.html when it preserved the original well. If no faithful transformed.html exists, or prior output became generic or lost content, use original.html once as the implementation base or rebuild from targeted original sections, then apply narrow fixes.
-- Make the smallest effective changes for each supported finding. Keep original assets and hrefs unless broken or inaccessible with no safe repair.
-- When adding CSS overrides for Tailwind-like classes that contain slash opacity, escape the slash in selectors and cover every used variant in transformed.html; examples include text-foreground/60 and bg-background/85.
-- If an issue is uncertain and changing it risks content loss or false claims, preserve the original and record the residual risk.
-- Ensure transformed.html can be served directly from the run directory without external build steps.
-
-solver-result.json must be valid JSON. Keep at least this compatible shape and add simple fields if helpful:
-{ "changed": true, "summary": "string", "accessibilityFixes": ["string"], "preservationNotes": ["string"], "removedContent": ["string"], "residualRisks": ["string"] }`,
-  votePrompt: (
-    { runDir, iterDir },
-    reviewer,
-  ) => `You are the ${reviewer.name}. Re-review transformed.html and vote on whether this candidate should be accepted.
-
-Run directory: ${runDir}
-Use source evidence already available from your findings pass; do not re-load unchanged source artifacts wholesale.
-Available current files:
-${fileList([
-  join(runDir, "transformed.html"),
-  join(iterDir, "checks.json"),
-  `${join(iterDir, "checks-full.json")} (targeted debugging only after citing a compact violation id/target)`,
-  join(iterDir, "aggregate-feedback.json"),
-  join(iterDir, "solver-task.md"),
-  join(iterDir, "solver-result.json"),
-])}
-${TARGETED_EVIDENCE}
-Output: ${join(iterDir, "votes", `${reviewer.id}.json`)}
-
-Compare transformed.html against the original evidence, brief, findings, solver task, solver result, and automated checks. Vote on both accessibility improvement and preservation quality.
-
-Accept only when:
-- checks.json passes, including axe, one h1, main, and no mobile horizontal overflow;
-- your role's important findings were fixed or credibly reduced;
-- no high-impact accessibility regression was introduced;
-- original brand identity, section order, substantive copy, CTAs, links, images/logos, schedule details, judging criteria, and partner information are acceptably preserved;
-- the page remains task-specific and does not read like a generic replacement.
-
-Vote revise when a fix is close but still has concrete remediable issues, such as weak focus styling, ambiguous CTA/link text, missing alt nuance, moderate contrast/reflow risk, or partial content preservation.
-
-Vote block when there is a serious accessibility failure, checks fail, important content was dropped, links/images were lost, brand identity was flattened, CTA meaning became ambiguous, schedule/judging/partner information disappeared, solver removed content merely to pass axe, or the page only passes automated checks while failing human accessibility/preservation review.
-
-Score 0-100. Suggested scale: 90-100 accept with minor residual risk; 70-89 revise; below 70 block for serious issue or destructive simplification. The reason must be short but specific, citing evidence such as check failure, missing content, element text, or remaining issue.
-
-Write exactly this tiny JSON shape:
-{ "vote": "accept" | "revise" | "block", "score": number, "reason": "short reason" }`,
-  decisionPrompt: ({
-    runDir,
-    iterDir,
-    iteration,
-  }) => `You are the swarm orchestrator. Decide whether iteration ${iteration} is done. Do not accept merely because automated checks pass.
-
-Run directory: ${runDir}
-Use the brief, aggregate feedback, and solver task already in this orchestrator session; do not re-load unchanged source artifacts wholesale.
-Available current files:
-${fileList([
-  join(iterDir, "checks.json"),
-  join(iterDir, "solver-result.json"),
-  `${join(iterDir, "votes")}/*.json`,
-  `${join(iterDir, "aggregate-feedback.json")} (targeted clarification only)`,
-  `${join(iterDir, "solver-task.md")} (targeted clarification only)`,
-])}
-Output: ${join(iterDir, "decision.json")}
-
-Write exactly this JSON shape:
-{ "outcome": "accept" | "continue" | "stop_with_risks", "reason": "string", "checksPass": boolean, "accepts": number, "blocks": number }
-
-Decision rules:
-- checksPass must reflect checks.json, not reviewer optimism.
-- Use accept only when checks pass, there are no block votes, reviewers mostly accept, accessibility is materially improved, and preservation is acceptable against the brief and solver-task.
-- Use continue when checks fail, important findings remain fixable, reviewers request revise, or the candidate passes axe but still drops content, loses links/images, flattens brand identity, has ambiguous CTAs, or looks like a generic page.
-- Treat failed axe color-contrast as fixable after a color/theme change unless the failure has already persisted through a targeted color-repair iteration or the run has exhausted its iteration budget.
-- Use stop_with_risks only when further iterations are unlikely to improve within this run, and explain the residual risks clearly.
-- If the transformed page appears worse than original or destructive, prefer continue unless retry limits or repeated failures make stop_with_risks more honest.
-
-The reason should mention the decisive evidence: automated pass/fail, accept/block counts, major unresolved accessibility items, and preservation status.`,
-  reportPrompt: (
-    { runDir },
-    decision?: Decision,
-  ) => `You are the swarm orchestrator. Write the final accessibility remediation report. The report should be useful for auditing, not just a success message.
-
-Run directory: ${runDir}
-Final decision: ${JSON.stringify(decision || null)}
-Use source evidence, brief, aggregate summaries, and prior decisions already in this orchestrator session.
-Available final artifacts:
-${fileList([
-  `${join(runDir, "iterations")}/*/solver-result.json`,
-  `${join(runDir, "iterations")}/*/checks.json`,
-  `${join(runDir, "iterations")}/*/votes/*.json`,
-  `${join(runDir, "iterations")}/*/decision.json`,
-  `${join(runDir, "transformed.html")} (targeted inspection only)`,
-])}
-Prefer compact artifacts and the latest iteration by default; inspect transformed.html or older iterations only as needed for concrete report evidence.
-Outputs:
-- ${join(runDir, "report.md")}
-- ${join(runDir, "report.html")}
-
-report.md should be concise but evidence-first. Include:
-- final outcome and whether automated checks passed;
-- what accessibility improved by category: semantic/screen reader, keyboard/motor, cognitive/task clarity, visual/low vision/responsive;
-- preservation assessment: what original content, CTAs, links, images/logos, schedule details, judging criteria, partners, and brand feel were preserved; identify any justified removals such as Lovable badge or decorative duplicates;
-- residual risks and limitations: issues not covered by axe, manual checks not performed, dynamic states not observed, uncertain semantic judgments, contrast/zoom/mobile caveats, or content that may need human verification;
-- reviewer vote summary and any stop_with_risks rationale;
-- link/reference to transformed.html and key artifacts.
-
-report.html should be simple standalone HTML linking to transformed.html and artifacts. Do not overstate compliance. Say that passing axe is required evidence, not a full WCAG conformance claim. Write only these report files.`,
+    return {
+      system: FIX_SYSTEM_PROMPT,
+      user: buildFixUserPrompt(findings, snippets, {
+        iteration: ctx.iteration,
+        totalFindings: total,
+        aggregateSummary,
+        htmlHead,
+      }),
+    };
+  },
+  votePrompt: ({ runDir, iterDir, iteration }, reviewer) => {
+    const priorIds = loadPriorFindingIds(runDir, iteration);
+    const hasChecklist = priorIds.length > 0;
+    const checklistSchema = hasChecklist
+      ? `{"vote":"accept","score":85,"reason":"...","regressionChecklist":[{"id":"semantic-1","status":"fixed"},{"id":"keyboard-2","status":"still_present"}]}`
+      : `{"vote":"accept","score":85,"reason":"..."}`;
+    return {
+      system:
+        `You are an expert web accessibility reviewer. Role: ${reviewer.id} — ${reviewer.name}.\n` +
+        `You have NO filesystem access. Respond ONLY with a JSON object — no markdown, no explanation.\n\n` +
+        `## Output format\n${checklistSchema}\n` +
+        (hasChecklist
+          ? `regressionChecklist status values: "fixed" = issue resolved, "still_present" = issue persists, "unchanged" = no change observed.\n\n`
+          : `\n`) +
+        `## Vote criteria\n` +
+        `Accept only when: checks.json passes (axe, one h1, main, no mobile overflow); your role's important findings were fixed or credibly reduced; no high-impact accessibility regression introduced; original brand identity, section order, substantive copy, CTAs, links, images/logos, schedule details, judging criteria, and partner information are acceptably preserved; the page remains task-specific.\n\n` +
+        `Vote revise when: a fix is close but still has concrete remediable issues — weak focus styling, ambiguous CTA/link text, missing alt nuance, moderate contrast/reflow risk, or partial content preservation.\n\n` +
+        `Vote block when: serious accessibility failure, checks fail, important content dropped, links/images lost, brand identity flattened, CTA meaning ambiguous, schedule/judging/partner information disappeared, solver removed content merely to pass axe, or the page only passes automated checks while failing human accessibility/preservation review.\n\n` +
+        `## Score scale\n90-100: accept with minor residual risk | 70-89: revise | below 70: block.\n` +
+        `The reason must be short but specific, citing evidence such as check failure, missing content, element text, or remaining issue.\n\n` +
+        `## Hard constraints\nNo markdown, no explanation, no file writes. JSON only.`,
+      user:
+        `## Iteration ${iteration} — ${reviewer.name} vote\n\n` +
+        `Run directory: ${runDir}\n\n` +
+        (hasChecklist
+          ? `## Prior finding IDs to cross-check (T3.2)\nFor each ID below, include a regressionChecklist entry with status "fixed", "still_present", or "unchanged".\n` +
+            priorIds.map((id) => `- ${id}`).join("\n") +
+            `\n\n`
+          : ``) +
+        `## Available evidence\n` +
+        fileList([
+          join(runDir, "transformed.html"),
+          join(iterDir, "checks.json"),
+          `${join(iterDir, "checks-full.json")} (targeted debugging only after citing a compact violation id/target)`,
+          join(iterDir, "aggregate-feedback.json"),
+          join(iterDir, "solver-task.md"),
+          join(iterDir, "solver-result.json"),
+        ]) +
+        `\n\n${TARGETED_EVIDENCE}\n\n` +
+        `Compare transformed.html against the original evidence, brief, findings, solver task, solver result, and automated checks. Vote on both accessibility improvement and preservation quality.`,
+    };
+  },
+  reportPrompt: ({ runDir }, decision?: Decision) => ({
+    system:
+      `You are an accessibility audit orchestrator writing a final remediation report. ` +
+      `Return your entire response as a single JSON object: {"markdown": "<your full markdown report>"}. ` +
+      `Place all markdown in the markdown field with \\n for line breaks. ` +
+      `The report should be useful for auditing, not just a success message. ` +
+      `Do not overstate compliance — passing axe is required evidence, not a full WCAG conformance claim. ` +
+      `No markdown fences outside the JSON field.`,
+    user:
+      `Write the final accessibility remediation report for this run.\n\n` +
+      `Run directory: ${runDir}\n` +
+      `Final decision: ${JSON.stringify(decision ?? null)}\n\n` +
+      `## Available artifacts\n` +
+      fileList([
+        `${join(runDir, "iterations")}/*/solver-result.json`,
+        `${join(runDir, "iterations")}/*/checks.json`,
+        `${join(runDir, "iterations")}/*/votes/*.json`,
+        `${join(runDir, "iterations")}/*/decision.json`,
+        `${join(runDir, "transformed.html")} (targeted inspection only)`,
+      ]) +
+      `\nPrefer compact artifacts and the latest iteration by default; inspect transformed.html or older iterations only as needed.\n\n` +
+      `## report.md must include\n` +
+      `- Final outcome and whether automated checks passed\n` +
+      `- Accessibility improvements by category: semantic/screen reader, keyboard/motor, cognitive/task clarity, visual/low vision/responsive\n` +
+      `- Preservation assessment: original content, CTAs, links, images/logos, schedule details, judging criteria, partners, and brand feel preserved; any justified removals\n` +
+      `- Residual risks and limitations: issues not covered by axe, manual checks not performed, dynamic states not observed, uncertain semantic judgments\n` +
+      `- Reviewer vote summary and any stop_with_risks rationale\n` +
+      `- Link/reference to transformed.html and key artifacts\n\n` +
+      `report.html should be simple standalone HTML linking to transformed.html and artifacts.`,
+  }),
 };
 
 async function scan(url: string, { runDir }: { runDir: string }) {
