@@ -62,6 +62,11 @@ try {
       res.end(JSON.stringify({ id, title: request.title || id, time: { created: Date.now(), updated: Date.now() }, directory: root, projectID: "mock", version: "mock" }));
       return;
     }
+    if (req.method === "GET" && req.url.startsWith("/config/providers?")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(mockProviders()));
+      return;
+    }
     if (req.method === "GET" && req.url.startsWith("/session/status?")) {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(Object.fromEntries([...sessions.keys()].map(id => [id, { type: "idle" }]))));
@@ -138,6 +143,22 @@ try {
   }
   await close(source);
   await close(opencode);
+}
+
+function mockProviders() {
+  const specs = [
+    process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash",
+    process.env.SWARM_ORCHESTRATOR_MODEL,
+    process.env.SWARM_FIXER_MODEL,
+  ].filter(Boolean);
+  const providers = new Map();
+  for (const spec of specs) {
+    const [providerID, ...rest] = spec.split("/");
+    const modelID = rest.join("/");
+    if (!providers.has(providerID)) providers.set(providerID, {});
+    providers.get(providerID)[modelID] = { id: modelID, providerID, variants: { max: {} } };
+  }
+  return { providers: [...providers].map(([id, models]) => ({ id, models })), default: {} };
 }
 
 async function writeMockOutput(prompt) {
