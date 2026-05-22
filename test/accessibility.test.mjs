@@ -163,38 +163,41 @@ test("accessibility prompts keep sidecars targeted and prior iteration exact", (
   const iterDir = join(runDir, "iterations", "002");
   const reviewer = accessibilityProfile.reviewers[0];
 
-  const findings = accessibilityProfile.findingsPrompt(
-    { rootDir: runDir, runDir, iterDir, iteration: 2 },
-    reviewer,
-  );
-  // Findings for iteration 2 run before iteration 2 check(), so the prompt must
-  // point at iteration 1 check evidence rather than a file that does not exist.
-  assert.match(findings, /iterations\/001\/checks-full\.json/);
-  assert.doesNotMatch(findings, /iterations\/002\/checks-full\.json/);
-  assert.doesNotMatch(findings, /iterations\/\*/);
-  assert.match(findings, /Open full sidecars only after/);
-
-  const aggregate = accessibilityProfile.aggregatePrompt({
+  const fix = accessibilityProfile.fixPrompt({
     rootDir: runDir,
     runDir,
     iterDir,
     iteration: 2,
   });
-  assert.match(aggregate, /top eight/);
-  assert.match(aggregate, /do not restate full evidence/);
-  assert.doesNotMatch(aggregate, /iterations\/\*/);
+  assert.match(fix, /iterations\/001\/checks\.json/);
+  assert.match(fix, /iterations\/001\/decision\.json/);
+  assert.doesNotMatch(fix, /iterations\/002\/checks\.json/);
+  assert.match(fix, /Open full sidecars only after/);
 
-  const fix = accessibilityProfile.fixPrompt({
+  const firstFix = accessibilityProfile.fixPrompt({
     rootDir: runDir,
     runDir,
     iterDir: join(runDir, "iterations", "001"),
     iteration: 1,
   });
   assert.match(
-    fix,
+    firstFix,
     /fixer is the only role allowed to load\/copy original\.html wholesale/,
   );
-  assert.match(fix, /never copy raw HTML into notes or summaries/);
+  assert.match(firstFix, /Do not use todo, task-list, planning, or subagent tools/);
+  assert.match(firstFix, /first file action must be copying original\.html/);
+  assert.match(firstFix, /Never copy raw HTML into notes or summaries/);
+  assert.match(firstFix, /substantially change layout, DOM structure/);
+  assert.match(firstFix, /Prefer bold, high-quality human accessibility improvements/);
+
+  const vote = accessibilityProfile.votePrompt(
+    { rootDir: runDir, runDir, iterDir, iteration: 2 },
+    reviewer,
+  );
+  assert.match(vote, /checks-full\.json/);
+  assert.match(vote, /Your review focus:/);
+  assert.match(vote, /Do not penalize layout changes/);
+  assert.doesNotMatch(vote, /aggregate-feedback/);
 });
 
 function assertCompactViolationShape(violation, nodeCount) {

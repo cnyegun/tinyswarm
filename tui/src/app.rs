@@ -54,7 +54,6 @@ impl ReviewerState {
 
 #[derive(Debug)]
 pub struct App {
-    pub command: String,
     pub status: RunStatus,
     pub profile: String,
     pub target: String,
@@ -100,7 +99,6 @@ pub struct ActivityLine {
 impl App {
     pub fn new(args: Vec<String>) -> Self {
         Self {
-            command: format!("npm run swarm:tui -- {}", args.join(" ")),
             status: RunStatus::Starting,
             profile: "accessibility".to_string(),
             target: args.last().cloned().unwrap_or_default(),

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -21,19 +21,14 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
 
   assert.equal(result.error, undefined);
   assert.equal(result.sessionCount, 5);
-  assert.equal(result.promptCount, 11);
+  assert.equal(result.promptCount, 6);
   assert.deepEqual(phases(result), [
     "brief",
-    "findings",
-    "findings",
-    "findings",
-    "aggregate",
     "fix",
     "vote",
     "vote",
     "vote",
     "decision",
-    "report",
   ]);
   assert.deepEqual(result.profileEvents.map((event) => event.type), ["scan", "check"]);
   assert.deepEqual(result.profileEvents.filter((event) => event.type === "check").map((event) => event.iteration), [1]);
@@ -50,16 +45,6 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
     "artifact.html",
     "report.md",
     "report.html",
-    "prompts/report.md",
-    "iterations/001/prompts/alpha-findings.md",
-    "iterations/001/prompts/beta-findings.md",
-    "iterations/001/prompts/gamma-findings.md",
-    "iterations/001/findings/alpha.json",
-    "iterations/001/findings/beta.json",
-    "iterations/001/findings/gamma.json",
-    "iterations/001/prompts/aggregate.md",
-    "iterations/001/aggregate-feedback.json",
-    "iterations/001/solver-task.md",
     "iterations/001/prompts/fix.md",
     "iterations/001/solver-result.json",
     "iterations/001/checks.json",
@@ -77,10 +62,10 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
   assert.equal((await readJson(result.runDir, "iterations/001/decision.json")).outcome, "accept");
   assert.deepEqual(await readJson(result.runDir, "sessions.json"), {
     orchestrator: "session-1",
-    alpha: "session-2",
-    beta: "session-3",
-    gamma: "session-4",
-    fixer: "session-5",
+    fixer: "session-2",
+    alpha: "session-3",
+    beta: "session-4",
+    gamma: "session-5",
   });
 
   assert.equal(result.preview["/"].status, 200);
@@ -113,7 +98,7 @@ test("runSwarm waits for stale pre-existing outputs to be rewritten", async () =
   const result = await runScenario("preexisting-brief");
 
   assert.equal(result.error, undefined);
-  assertPhaseOrder(result, ["brief", "findings"]);
+  assertPhaseOrder(result, ["brief", "fix"]);
   assert.equal(await readText(result.runDir, "brief.md"), "# Brief\n\nScenario preexisting-brief\n");
   assert.match(await readText(result.runDir, "prompts/brief.md"), /PHASE: brief/);
 });
@@ -122,7 +107,7 @@ test("runSwarm keeps prompt payloads path-only when artifacts are large", async 
   const result = await runScenario("large-artifacts");
 
   assert.equal(result.error, undefined);
-  assert.equal(result.promptCount, 11);
+  assert.equal(result.promptCount, 6);
   // The mock profile lists full sidecar paths in prompts. This proves paths are
   // allowed while raw file contents stay out of the opencode payload.
   assert.equal(
@@ -153,15 +138,16 @@ test("runSwarm supports profiles with no reviewers", async () => {
 
   assert.equal(result.error, undefined);
   assert.equal(result.sessionCount, 2);
-  assertPhaseOrder(result, ["brief", "aggregate", "fix", "decision", "report"]);
+  assertPhaseOrder(result, ["brief", "fix"]);
   assert.equal(phaseCount(result, "findings"), 0);
   assert.equal(phaseCount(result, "vote"), 0);
+  assert.equal(phaseCount(result, "decision"), 0);
   assert.deepEqual(await readJson(result.runDir, "sessions.json"), {
     orchestrator: "session-1",
     fixer: "session-2",
   });
-  assert.equal((await readdir(join(result.runDir, "iterations/001/findings"))).length, 0);
-  assert.equal((await readdir(join(result.runDir, "iterations/001/votes"))).length, 0);
+  assert.equal(existsSync(join(result.runDir, "iterations/001/findings")), false);
+  assert.equal(existsSync(join(result.runDir, "iterations/001/votes")), false);
   assert.equal((await readJson(result.runDir, "iterations/001/decision.json")).accepts, 0);
 });
 
@@ -170,8 +156,8 @@ test("runSwarm continues, reuses sessions, overwrites the artifact, and accepts 
 
   assert.equal(result.error, undefined);
   assert.equal(result.sessionCount, 5);
-  assert.equal(result.promptCount, 20);
-  assert.equal(result.maxActiveByPhase.findings, 3);
+  assert.equal(result.promptCount, 7);
+  assert.equal(result.maxActiveByPhase.findings, undefined);
   assert.equal(result.maxActiveByPhase.vote, 3);
   assert.deepEqual(result.profileEvents.filter((event) => event.type === "check").map((event) => event.iteration), [1, 2]);
 
@@ -182,11 +168,11 @@ test("runSwarm continues, reuses sessions, overwrites the artifact, and accepts 
   assert.equal(JSON.parse(result.preview["/checks.json"].body).iteration, 2);
 
   const sessionIDsByPhase = groupSessionIDsByPhase(result);
-  assert.deepEqual(sessionIDsByPhase.findings, ["session-2", "session-3", "session-4"]);
-  assert.deepEqual(sessionIDsByPhase.vote, ["session-2", "session-3", "session-4"]);
-  assert.deepEqual(sessionIDsByPhase.aggregate, ["session-1"]);
+  assert.equal(sessionIDsByPhase.findings, undefined);
+  assert.deepEqual(sessionIDsByPhase.vote, ["session-3", "session-4", "session-5"]);
+  assert.equal(sessionIDsByPhase.aggregate, undefined);
   assert.deepEqual(sessionIDsByPhase.decision, ["session-1"]);
-  assert.deepEqual(sessionIDsByPhase.fix, ["session-5"]);
+  assert.deepEqual(sessionIDsByPhase.fix, ["session-2"]);
 });
 
 test("runSwarm converts a final continue decision into stop_with_risks at the iteration cap", async () => {
@@ -197,11 +183,9 @@ test("runSwarm converts a final continue decision into stop_with_risks at the it
   assert.equal((await readJson(result.runDir, "iterations/001/decision.json")).outcome, "continue");
   const finalDecision = await readJson(result.runDir, "iterations/002/decision.json");
   assert.equal(finalDecision.outcome, "stop_with_risks");
-  assert.match(finalDecision.reason, /^max iterations reached: continue at iteration 2/);
+  assert.match(finalDecision.reason, /^max iterations reached: automated checks failed/);
   assert.equal(existsSync(join(result.runDir, "iterations/003")), false);
 
-  const reportPrompt = await readText(result.runDir, "prompts/report.md");
-  assert.match(reportPrompt, /FINAL_DECISION: .*stop_with_risks/);
   assert.match(await readText(result.runDir, "report.md"), /stop_with_risks/);
 });
 
@@ -221,7 +205,7 @@ test("runSwarm stops immediately on stop_with_risks and still writes the final r
   assert.deepEqual(result.profileEvents.filter((event) => event.type === "check").map((event) => event.iteration), [1]);
   assert.equal((await readJson(result.runDir, "iterations/001/decision.json")).outcome, "stop_with_risks");
   assert.equal(existsSync(join(result.runDir, "iterations/002")), false);
-  await assertFiles(result.runDir, ["report.md", "report.html", "prompts/report.md"]);
+  await assertFiles(result.runDir, ["report.md", "report.html"]);
 });
 
 test("runSwarm logs scan failure and never opens agent sessions", async () => {
@@ -244,11 +228,10 @@ test("runSwarm propagates check exceptions and does not vote, decide, report, or
   const result = await runScenario("check-throws");
 
   assert.match(result.error, /check exploded at 1/);
-  assertPhaseOrder(result, ["brief", "findings", "aggregate", "fix"]);
+  assertPhaseOrder(result, ["brief", "fix"]);
   assertNoPhases(result, ["vote", "decision", "report"]);
   assert.equal(existsSync(join(result.runDir, "iterations/001/checks.json")), false);
-  assert.equal(existsSync(join(result.runDir, "iterations/001/votes")), true);
-  assert.equal((await readdir(join(result.runDir, "iterations/001/votes"))).length, 0);
+  assert.equal(existsSync(join(result.runDir, "iterations/001/votes")), false);
   assert.equal(existsSync(join(result.runDir, "iterations/001/decision.json")), false);
   assert.equal(existsSync(join(result.runDir, "report.md")), false);
   assert.equal(result.localUrl, undefined);
@@ -261,7 +244,7 @@ test("runSwarm characterizes malformed check results before voting or reporting"
   const result = await runScenario("check-missing-failures");
 
   assert.match(result.error, /Cannot read.*length|undefined/);
-  assertPhaseOrder(result, ["brief", "findings", "aggregate", "fix"]);
+  assertPhaseOrder(result, ["brief", "fix"]);
   assertNoPhases(result, ["vote", "decision", "report"]);
   assert.equal(existsSync(join(result.runDir, "iterations/001/checks.json")), true);
   assert.deepEqual(await readJson(result.runDir, "iterations/001/checks.json"), {
@@ -275,7 +258,7 @@ test("runSwarm validates decision.json and fails before reporting invalid orches
   const result = await runScenario("invalid-decision");
 
   assert.match(result.error, /invalid decision outcome/);
-  assertPhaseOrder(result, ["brief", "findings", "aggregate", "fix", "vote", "decision"]);
+  assertPhaseOrder(result, ["brief", "fix", "vote", "decision"]);
   assert.equal(phaseCount(result, "vote"), 3);
   assertNoPhases(result, ["report"]);
   assert.equal(existsSync(join(result.runDir, "iterations/001/decision.json")), true);
@@ -327,38 +310,32 @@ test("runSwarm propagates opencode session creation failures", async () => {
   assert.equal(result.localUrl, undefined);
 });
 
-test("runSwarm propagates reviewer session creation failures during parallel findings", async () => {
+test("runSwarm propagates reviewer session creation failures during voting", async () => {
   const result = await runScenario("reviewer-session-create-error");
 
   assert.match(result.error, /session create|session create unavailable|ResponseStatusError|500/);
   assert.equal(result.sessionRequests.some((request) => request.key === "alpha" && request.failed), true);
   assert.equal((await readJson(result.runDir, "sessions.json")).orchestrator, "session-1");
   assert.equal(phaseCount(result, "brief"), 1);
-  assertNoPhases(result, ["aggregate", "fix", "vote", "decision", "report"]);
-  assert.equal(existsSync(join(result.runDir, "iterations/001/aggregate-feedback.json")), false);
+  assertPhaseOrder(result, ["brief", "fix"]);
+  assertNoPhases(result, ["decision", "report"]);
   assert.equal(result.localUrl, undefined);
 });
 
-test("runSwarm propagates partial reviewer findings prompt failures", async () => {
+test("runSwarm no longer runs a reviewer findings phase", async () => {
   const result = await runScenario("findings-prompt-error");
 
-  assert.match(result.error, /session prompt|prompt unavailable|ResponseStatusError|500/);
-  assert.equal(phaseCount(result, "brief"), 1);
-  assert.equal(phaseCount(result, "findings"), 3);
-  assertNoPhases(result, ["aggregate", "fix", "vote", "decision", "report"]);
-  assert.equal(existsSync(join(result.runDir, "iterations/001/prompts/alpha-findings.md")), true);
-  assert.equal(existsSync(join(result.runDir, "iterations/001/findings/alpha.json")), false);
-  assert.equal(existsSync(join(result.runDir, "iterations/001/findings/beta.json")), true);
-  assert.equal(existsSync(join(result.runDir, "iterations/001/findings/gamma.json")), true);
-  assert.deepEqual(result.profileEvents.filter((event) => event.type === "check"), []);
-  assert.equal(result.localUrl, undefined);
+  assert.equal(result.error, undefined);
+  assert.equal(phaseCount(result, "findings"), 0);
+  assert.equal(phaseCount(result, "vote"), 3);
+  assert.equal((await readJson(result.runDir, "iterations/001/decision.json")).outcome, "accept");
 });
 
 test("runSwarm propagates partial reviewer vote prompt failures", async () => {
   const result = await runScenario("vote-prompt-error");
 
   assert.match(result.error, /session prompt|prompt unavailable|ResponseStatusError|500/);
-  assertPhaseOrder(result, ["brief", "findings", "aggregate", "fix", "vote"]);
+  assertPhaseOrder(result, ["brief", "fix", "vote"]);
   assert.equal(phaseCount(result, "vote"), 3);
   assertNoPhases(result, ["decision", "report"]);
   assert.equal(existsSync(join(result.runDir, "iterations/001/checks.json")), true);
@@ -391,31 +368,33 @@ test("runSwarm falls back from the preferred preview port when 5177 is occupied"
   assert.equal(result.preview["/"].status, 200);
 });
 
-test("runSwarm passes configured agent, model, variant, title, and permissions to opencode", async () => {
+test("runSwarm passes configured agent, model, role variant, title, and permissions to opencode", async () => {
   const result = await runScenario("model-env");
 
   assert.equal(result.error, undefined);
   assert.equal(result.sessionCount, 5);
-  for (const { request } of result.sessionRequests) {
+  for (const { key, request } of result.sessionRequests) {
+    const isMax = key === "orchestrator" || key === "fixer";
     assert.match(request.title, /^swarm (orchestrator|alpha|beta|gamma|fixer) runs\//);
     assert.equal(request.agent, "architect-test-agent");
     assert.deepEqual(request.model, {
       providerID: "test-provider",
       id: "model/family",
-      variant: "nightly",
+      variant: isMax ? "max" : "low",
     });
     assert.deepEqual(request.permission, [
       { permission: "*", pattern: "*", action: "allow" },
     ]);
   }
-  for (const { request, text } of result.promptRequests) {
+  for (const { phase, request, text } of result.promptRequests) {
+    const isMax = !["findings", "vote"].includes(phase);
     assert.match(text, new RegExp(`RUN_DIR: ${escapeRegExp(result.runDir)}`));
     assert.equal(request.agent, "architect-test-agent");
     assert.deepEqual(request.model, {
       providerID: "test-provider",
       modelID: "model/family",
     });
-    assert.equal(request.variant, "nightly");
+    assert.equal(request.variant, isMax ? "max" : "low");
   }
 });
 
@@ -428,7 +407,7 @@ test("runSwarm can use pro model for orchestrator and fixer only", async () => {
     assert.deepEqual(request.model, {
       providerID: isPro ? "pro-provider" : "flash-provider",
       id: isPro ? "pro-model" : "flash-model",
-      variant: "max",
+      variant: isPro ? "max" : "low",
     });
   }
   for (const { phase, request } of result.promptRequests) {
@@ -437,7 +416,7 @@ test("runSwarm can use pro model for orchestrator and fixer only", async () => {
       providerID: isPro ? "pro-provider" : "flash-provider",
       modelID: isPro ? "pro-model" : "flash-model",
     });
-    assert.equal(request.variant, "max");
+    assert.equal(request.variant, isPro ? "max" : "low");
   }
 });
 

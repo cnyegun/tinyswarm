@@ -11,7 +11,6 @@ import { createServer, type Server } from "node:http";
 import { chromium, type Page } from "playwright";
 import type {
   CheckResult,
-  Decision,
   SwarmProfile,
 } from "./core.js";
 
@@ -73,21 +72,15 @@ const HTML_SRCSET_ATTRIBUTE = /(\ssrcset=)(["'])([^"']*)\2/gi;
 const ROOT_RELATIVE_CSS_URL = /url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi;
 
 const reviewers = [
-  { id: "semantic", name: "screen-reader/semantic structure reviewer" },
-  { id: "keyboard", name: "keyboard and motor access reviewer" },
-  { id: "cognitive", name: "cognitive load and task clarity reviewer" },
-  { id: "visual", name: "low-vision, contrast, zoom, mobile reviewer" },
+  { id: "accessibility", name: "accessibility reviewer" },
+  { id: "preservation", name: "preservation and task clarity reviewer" },
 ];
 
 const roleCriteria: Record<string, string> = {
-  semantic:
-    "WCAG 1.1.1, 1.3.1, 1.3.2, 2.4.2, 2.4.4, 2.4.6, 3.1.1, 4.1.2; landmarks; one meaningful h1; heading hierarchy; names/descriptions; alt text; native HTML before ARIA.",
-  keyboard:
-    "WCAG 2.1.1, 2.1.2, 2.4.1, 2.4.3, 2.4.7, 2.4.11, 2.5.3, 2.5.8; reachability, activation, traps, focus order, visible unobscured focus, target size, and pointer-only behavior.",
-  cognitive:
-    "WCAG 2.4.4, 2.4.6, 3.2.x, 3.3.x where applicable; clear CTA purpose, labels/instructions, predictable navigation, understandable details, and no destructive rewriting.",
-  visual:
-    "WCAG 1.4.1, 1.4.3, 1.4.4, 1.4.10, 1.4.11, 1.4.12, 2.4.7, 2.4.13; contrast, text spacing, zoom/reflow, mobile layout, non-text contrast, focus appearance, and visual identity.",
+  accessibility:
+    "High-impact WCAG coverage only: names/roles/landmarks, heading order, keyboard reachability, visible focus, link/button names, alt text, contrast, zoom/reflow, and mobile overflow.",
+  preservation:
+    "Preservation and task clarity: keep purpose, substantive copy, CTAs, links, important media/logos, key details, partners/sponsors, and recognizable brand vibe. Layout changes are allowed.",
 };
 
 const TARGETED_EVIDENCE =
@@ -103,8 +96,7 @@ function fileList(paths: string[]) {
   return paths.map((path) => `- ${path}`).join("\n");
 }
 
-// Findings happen before the current iteration's check step, so the newest
-// check evidence available during iteration N is from iteration N-1.
+// Later fixer iterations repair the previous iteration's checks/votes.
 function previousIterationDir(runDir: string, iteration: number) {
   return join(runDir, "iterations", String(iteration - 1).padStart(3, "0"));
 }
@@ -120,7 +112,7 @@ export const accessibilityProfile: SwarmProfile = {
   // not each rediscover the same facts from raw HTML.
   briefPrompt: ({
     runDir,
-  }) => `You are the swarm orchestrator for an accessibility remediation run. Use the available source page evidence to write a practical, preservation-focused accessibility brief for specialist reviewers and the fixer.
+  }) => `You are the swarm orchestrator for an accessibility remediation run. Use the available source page evidence to write a short, informative brief for a powerful accessibility rewrite. The fixer may redesign layout and structure when that produces better accessibility.
 
 Run directory: ${runDir}
 Available files:
@@ -137,128 +129,18 @@ Output: ${join(runDir, "brief.md")}
 
 Use WCAG 2.2, WAI Easy Checks, WAI-ARIA Authoring Practices, WebAIM-style pragmatic testing, Inclusive Design Principles, and accessibility usability guidance as references. Treat axe as useful evidence, not a complete evaluation.
 
+Keep brief.md concise: target 500-800 words, no duplicated bullets, no repeated evidence across sections, no raw HTML, and no long axe-node excerpts. Prefer specific facts over broad WCAG boilerplate. If an issue belongs in multiple categories, mention it once under the most relevant category and cross-reference it by short label only if needed.
+
 Write brief.md with these sections:
-- Page purpose and user tasks: infer the actual purpose from facts.json and targeted original snippets without inventing a new campaign, event, product, or organization.
-- Preservation inventory: list concrete brand/signature elements, section order, copy themes, CTAs, links, image/logo assets, schedule details, judging criteria, sponsor/partner information, and any unique visual tone that must survive remediation.
-- Allowed removals: only identify content that may be removed if evidence supports it, such as a Lovable badge, duplicated decorative clutter, inaccessible duplicate controls with an accessible equivalent, or empty generated wrappers. Do not authorize removal of substantive content.
-- Initial accessibility evidence: summarize axe violations by id and affected area, plus likely semantic, keyboard, cognitive, and visual risks that need human review.
-- Reviewer focus: assign category-specific criteria. Screen-reader/semantic reviewers should check names, roles, landmarks, heading hierarchy, text alternatives, language, reading order, and link purpose. Keyboard reviewers should check focus order, activation, traps, visible focus, target size, skip/bypass needs, and pointer-only behavior. Cognitive reviewers should check task clarity, CTA meaning, form/instruction clarity, content simplification risks, and whether original information remains understandable. Visual reviewers should check contrast, reflow, zoom, spacing, responsive behavior, non-text contrast, focus appearance, and mobile overflow.
-- Acceptance bar: passing automated checks is required but not sufficient. Acceptable remediation must improve accessibility while preserving the original page identity and materially all user-relevant content.
+- Page purpose and vibe: 4-8 bullets covering the actual purpose, distinctive brand/visual tone, key CTAs, links, images/logos, schedule/details, judging criteria, partners/sponsors, and anything substantive that must not be lost. Do not require the original layout or section order unless it is essential to the task.
+- Allowed removals: only evidence-supported non-substantive content such as a Lovable badge, decorative duplicates, empty wrappers, or duplicate inaccessible controls with an accessible equivalent.
+- Top accessibility evidence: at most 8 bullets. Group related axe violations and human-review risks by affected area; cite compact ids/targets only.
+- Reviewer focus: one short line per reviewer role, only naming what that role should uniquely verify. Avoid repeating the same task under multiple roles.
+- Acceptance bar: 2-4 bullets covering automated checks, human accessibility, responsive/keyboard usability, retained content, and recognizable vibe.
 
 ${COMPACT_OUTPUT}
 
 Be evidence-based. If something is uncertain, mark it as uncertain rather than turning it into a requirement. Write only files inside the run directory.`,
-  // Findings are per-reviewer and intentionally narrow. Later iterations reuse
-  // the same reviewer session, so the prompt points at only the latest changed
-  // files instead of making each reviewer re-read the whole source page.
-  findingsPrompt: (
-    { runDir, iterDir, iteration },
-    reviewer,
-  ) => `You are the ${reviewer.name}. Review iteration ${iteration} as a specialist accessibility detector. Your job is to produce specific, evidence-based findings, not generic advice.
-
-Run directory: ${runDir}
-${
-  iteration === 1
-    ? `Available files:
-${fileList([
-  join(runDir, "brief.md"),
-  join(runDir, "facts.json"),
-  join(runDir, "axe.json"),
-  `${join(runDir, "transformed.html")} (if present)`,
-  `${join(iterDir, "checks.json")} (if present)`,
-])}
-Use ${join(runDir, "original.html")} or ${join(runDir, "axe-full.json")} only for targeted verification when compact evidence is insufficient for a named id/target.`
-    : `Use source evidence already in this reviewer session; do not re-load unchanged source artifacts wholesale.
-Available current and latest prior files:
-${fileList([
-  join(runDir, "transformed.html"),
-  `${join(previousIterationDir(runDir, iteration), "checks.json")} (latest prior compact checks)`,
-  `${join(previousIterationDir(runDir, iteration), "aggregate-feedback.json")} (latest prior summary, if needed)`,
-  `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest prior solver notes, if needed)`,
-])}
-Use ${join(previousIterationDir(runDir, iteration), "checks-full.json")} only for targeted debugging after citing a compact check id/target that lacks enough element detail.`
-}
-${TARGETED_EVIDENCE}
-Output: ${join(iterDir, "findings", `${reviewer.id}.json`)}
-
-Ground every finding in observable evidence from the files. Cite concrete element text, heading text, link text/href, image src/alt, section names, axe violation ids/nodes, or before/after differences. Do not hallucinate failures. If you cannot locate the affected content, do not report it as a finding.
-
-Use this severity model when deciding risk:
-- high: blocks key tasks, drops important original content, creates an inaccessible control/path, causes a serious WCAG failure, or substantially flattens brand/content into a generic page.
-- medium: likely impairs comprehension, navigation, reading order, link purpose, focus visibility, contrast, zoom/reflow, or content preservation but has a workaround.
-- low: minor polish, ambiguous improvement, or advisory issue with limited user impact.
-
-Your role criteria: ${roleCriteria[reviewer.id] || "use the role described above."}
-
-When transformed.html exists, compare it against compact source evidence, targeted original snippets, brief.md, and the preservation inventory. Flag regressions if important copy, CTAs, links, logos/images, schedule details, judging criteria, partner information, or brand feel were lost without accessibility justification. Passing axe does not excuse these regressions.
-
-Prefer typed findings in the findings array using compact strings with this pattern: id=<role>-N | category=<semantic|keyboard|cognitive|visual|preservation|automated> | severity=<low|medium|high> | confidence=<low|medium|high> | location=<specific element/section/text> | evidence=<observable fact> | issue=<user impact> | suggestedFix=<faithful remediation>. The JSON contract still requires findings to be an array of strings, so keep each record as one string.
-
-If no issue is proven, use an empty findings array and risk low. Do not edit transformed.html.
-
-Write exactly this JSON shape:
-{ "role": "${reviewer.id}", "findings": ["id=${reviewer.id}-1 | category=... | severity=... | confidence=... | location=... | evidence=... | issue=... | suggestedFix=..."], "risk": "low" | "medium" | "high" }`,
-  // The aggregate phase is where noisy parallel reviewer output gets converted
-  // into a small work order. The caps below are prompt-level guardrails: they do
-  // not hide data, because agents can still inspect targeted artifacts.
-  aggregatePrompt: ({
-    runDir,
-    iterDir,
-    iteration,
-  }) => `You are the swarm orchestrator. Aggregate specialist findings for iteration ${iteration} into an evidence-first remediation task. Normalize, deduplicate, and prioritize; do not invent issues that reviewers did not support with evidence.
-
-Run directory: ${runDir}
-Use source evidence and brief already in this orchestrator session; do not re-load unchanged source artifacts wholesale.
-Available current files:
-${fileList([
-  `${join(iterDir, "findings")}/*.json`,
-  join(runDir, "transformed.html"),
-  ...(iteration > 1
-    ? [
-        `${join(previousIterationDir(runDir, iteration), "aggregate-feedback.json")} (latest prior summary, if needed)`,
-        `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest prior solver notes, if needed)`,
-        `${join(previousIterationDir(runDir, iteration), "checks.json")} (latest prior checks, if needed)`,
-      ]
-    : []),
-])}
-Inspect only targeted snippets needed to resolve supported findings. Use latest prior iteration artifacts by default; inspect older iterations only to resolve a named regression or decision conflict.
-Outputs:
-- ${join(iterDir, "aggregate-feedback.json")}
-- ${join(iterDir, "solver-task.md")}
-
-aggregate-feedback.json must remain compatible with this shape:
-{ "summary": "string", "priorities": ["short task"], "risks": ["short risk"] }
-Keep summary to three sentences or fewer, priorities to the high-signal top eight, and risks to the high-signal top six. Reference evidence ids, severity, confidence, category, source reviewer, affected original/transformed content, and whether the item is a must-fix, should-fix, preservation guardrail, or residual risk; do not restate full evidence unless a short quote is necessary.
-
-Build a score-driven priority order:
-- Critical preservation regressions and blocked key tasks outrank cosmetic accessibility tweaks.
-- Axe violations and deterministic check failures are must-fix, but automated pass is not enough.
-- Semantic and usability findings need evidence and confidence. Do not let a low-confidence hallucinated finding drive destructive changes.
-- If the current transformed.html is worse than the source evidence because it dropped content or became a generic landing page, instruct the fixer to restore affected sections from targeted original snippets, then remediate narrowly.
-
-solver-task.md should be an outcome-based work order, not a patch recipe. The orchestrator acts as a manager: define the problem, priority, evidence, user impact, preservation boundaries, policy decisions, and acceptance criteria. The fixer owns implementation strategy and may make any local HTML/CSS/JS/asset-reference changes needed to satisfy accessibility checks while preserving the page.
-
-Do not micromanage implementation tactics in solver-task.md:
-- Do not limit the fixer to a fixed number of changes when violations remain.
-- Do not require exact CSS blocks, exact selector edits, wrapper structures, or DOM mechanics unless a specific target is cited as evidence.
-- Do not prescribe clipping or scrolling tactics such as overflow-x:hidden or overflow:auto as a reflow fix. If scrolling is an intentional accessible design choice, state the accessibility requirements instead: keyboard access, focusability, accessible name, and no hidden content.
-- Do not say no structural changes when fixing the issue may require responsive layout, landmark, control, or embed restructuring.
-- Do not claim third-party violations are residual risks while also requiring zero axe violations. Choose and state the policy: either preserve with explicit residual risk, or allow the fixer to replace the third-party embed/widget with an accessible fallback that preserves equivalent user access.
-
-Include these sections:
-- Objective: faithful accessibility remediation of the original page, not a generic replacement.
-- Source of truth: compact source evidence, targeted original/transformed snippets, brief.md, and this aggregate feedback.
-- Preservation requirements: preserve original brand feel, section order, substantive copy, CTAs, link destinations/text meaning, images/logos unless decorative, schedule details, judging criteria, partner/sponsor information, and any distinctive visual language unless accessibility requires a targeted adjustment.
-- Allowed removals/replacements: avoid removing substantive content to make checks pass. Allow removal of the Lovable badge, decorative duplicates, empty wrappers, duplicate inaccessible controls when an accessible equivalent remains, and third-party widgets/embeds only when replaced with equivalent accessible content or links. Require a short justification for each removal or replacement.
-- Must-fix accessibility items: list each supported issue with evidence ids or short evidence, affected element/section, user impact, and acceptance criteria.
-- Faithful remediation constraints: prefer semantic HTML, corrected names/labels/alt text, contrast/focus/reflow CSS, and focused structural repairs over wholesale redesign. Do not replace the page with a generic hero/features/testimonials/contact template. Do not rewrite CTAs into vague labels. Do not drop links or images to make axe pass unless an equivalent accessible replacement is provided and justified.
-- Color/theme repair guardrail: treat background, foreground, muted, accent, link, and CTA/button colors as a paired system. If a task changes dark/light background utilities, also require matching foreground utilities, slash-opacity variants, bg-background opacity variants, body background, and default anchor/CTA colors so computed contrast passes. Do not accept token-name fixes without computed foreground/background contrast evidence.
-- Acceptance criteria: valid standalone HTML, title, exactly one h1, main landmark, no axe violations, no mobile horizontal overflow, visible focus styles, responsive layout, improved accessibility score, preserved key content and identity, no unsupported removals.
-- Solver evidence request: solver-result.json should include changed, summary, accessibilityFixes, implementation decisions, deviations from solver-task tactics if any, preservationNotes, removedContent/replacements, and residualRisks if useful, while remaining simple compact JSON.
-
-${COMPACT_OUTPUT}
-
-Write only these files.`,
   // The fixer is the only role allowed to use original.html as a full starting
   // point. Reviewer/orchestrator phases should cite snippets, while the fixer may
   // need the whole page once to produce a faithful standalone HTML output.
@@ -266,7 +148,9 @@ Write only these files.`,
     runDir,
     iterDir,
     iteration,
-  }) => `You are the fixer. Apply solver-task.md for iteration ${iteration}. Your output must be a faithful accessibility remediation of the original page, not a generic replacement landing page.
+  }) => `You are the fixer for iteration ${iteration}. Your output must be an excellent accessibility rewrite of the original page, not a generic replacement landing page. Great accessibility changes may substantially improve or surprise the original design.
+
+Do not use todo, task-list, planning, or subagent tools. Do not pause to make a plan artifact. Write the required output files directly. On iteration 1, if transformed.html does not exist, your first file action must be copying original.html to transformed.html; then edit transformed.html in place.
 
 Run directory: ${runDir}
 ${
@@ -278,15 +162,15 @@ ${fileList([
   join(runDir, "axe.json"),
   `${join(runDir, "axe-full.json")} (targeted debugging only after compact axe id/target lacks detail)`,
   join(runDir, "brief.md"),
-  join(iterDir, "aggregate-feedback.json"),
-  join(iterDir, "solver-task.md"),
 ])}
-Inspect only the source snippets needed to preserve and repair the page. The fixer is the only role allowed to load/copy original.html wholesale, and only once as the implementation base when no faithful transformed.html exists. If transformed.html does not exist, do not build it from scratch: run cp from original.html to transformed.html first, then edit transformed.html in place to save tokens and preserve the page. never copy raw HTML into notes or summaries.`
+First pass: fix the compact axe violations and baseline requirements from brief.md while keeping the site recognizable. Inspect only the source snippets needed to understand and repair the page. The fixer is the only role allowed to load/copy original.html wholesale, and only once as the implementation base when no transformed.html exists. If transformed.html does not exist, do not build it from scratch: run cp from original.html to transformed.html as your first file action, then edit transformed.html in place to save tokens and preserve source-specific content. Never copy raw HTML into notes or summaries.`
     : `Use unchanged source evidence already in this fixer session; do not re-load unchanged source artifacts wholesale.
 Available current files:
 ${fileList([
-  join(iterDir, "aggregate-feedback.json"),
-  join(iterDir, "solver-task.md"),
+  `${join(previousIterationDir(runDir, iteration), "checks.json")} (fix these first if checks failed)`,
+  `${join(previousIterationDir(runDir, iteration), "decision.json")} (why the last iteration continued)`,
+  `${join(previousIterationDir(runDir, iteration), "votes")}/*.json (only if checks passed but reviewers requested changes)`,
+  `${join(previousIterationDir(runDir, iteration), "solver-result.json")} (latest solver notes)`,
   `${join(runDir, "transformed.html")} (targeted inspection only)`,
 ])}`
 }
@@ -297,16 +181,17 @@ Outputs:
 
 Hard constraints:
 - Produce valid standalone HTML in transformed.html.
-- Keep the original page purpose, brand feel, visual tone, section order, substantive copy, CTAs, links, images/logos, schedule details, judging criteria, partner/sponsor information, and other user-relevant details unless an accessibility fix requires a targeted change.
-- Do not create a generic hero/features/testimonials/contact page. Do not replace specific event or organization content with vague marketing filler. Do not invent new dates, sponsors, judging criteria, links, or claims.
-- Do not remove substantive content solely to make checks pass. You may remove or replace decorative duplicates, empty wrappers, duplicate inaccessible controls, or inaccessible third-party widgets/embeds when an accessible equivalent remains and the decision is justified in solver-result.json.
-- Passing axe is required but not sufficient. Also preserve content and improve human accessibility.
+- Keep the original page purpose, core content, CTAs, link destinations, important images/logos, key details, partner/sponsor information, and recognizable brand vibe.
+- You may substantially change layout, DOM structure, spacing, grouping, visual hierarchy, component design, and responsive behavior when it improves accessibility.
+- Do not create a generic hero/features/testimonials/contact page. Do not replace specific event, organization, product, or service content with vague marketing filler. Do not invent new dates, sponsors, judging criteria, links, products, or claims.
+- Do not remove substantive content solely to make checks pass. You may simplify, reorganize, restyle, or replace inaccessible patterns with accessible equivalents when the user can still accomplish the same tasks.
+- Passing axe is required but not sufficient. Prefer bold, high-quality human accessibility improvements over timid layout preservation.
 - Color fixes must repair the whole computed color system, not a single class. If restoring or changing backgrounds, also verify and fix body/html background, text-foreground, text-foreground slash-opacity variants, text-muted-foreground, accent text, bg-background slash-opacity variants, default anchors, and CTA/button foreground/background colors.
 
 Implementation authority:
-- You own the implementation strategy. Treat solver-task.md as goals, evidence, constraints, policy, and acceptance criteria; do not treat any tactical suggestion as mandatory if it conflicts with accessibility, preservation, or the automated checks.
-- You may make whatever local HTML, CSS, JS, ARIA, landmark, responsive layout, embed/widget, or asset-reference changes are needed to fix supported violations and avoid regressions.
-- If solver-task.md is too narrow, contradictory, or suggests a tactic that would create a new violation, choose the better implementation and explain the deviation in solver-result.json.
+- You own the implementation strategy. Treat brief.md, axe/check failures, prior votes, and prior decisions as goals, evidence, constraints, policy, and acceptance criteria; do not treat any tactical suggestion as mandatory if it conflicts with accessibility, content, vibe, or the automated checks.
+- You may make whatever local HTML, CSS, JS, ARIA, landmark, responsive layout, component, copy-structure, embed/widget, or asset-reference changes are needed to produce a more accessible page.
+- If prior guidance is too narrow, contradictory, or suggests a tactic that would create a new violation, choose the better implementation and explain the deviation in solver-result.json.
 - Fix root causes, not symptoms. Do not hide overflow, clip content, add inaccessible scroll wrappers, remove focusability, or drop content merely to silence a checker.
 
 Required accessibility baseline:
@@ -317,8 +202,8 @@ Required accessibility baseline:
 - Use native HTML before ARIA. If ARIA is needed, follow WAI-ARIA Authoring Practices for roles, states, properties, names, keyboard behavior, and landmarks.
 
 Implementation guidance:
-- Start from the best prior transformed.html when it preserved the original well. If transformed.html does not exist, copy original.html to transformed.html with cp, then edit transformed.html in place. If a prior transformed.html exists but became generic or lost content, restore from original.html with targeted copies or by replacing transformed.html from original.html once, then apply narrow fixes. Do not build transformed.html from scratch.
-- Make the smallest effective set of changes that actually clears supported violations and preserves the page. Keep original assets and hrefs unless broken, inaccessible, or replaced with an equivalent accessible fallback.
+- Start from the best prior transformed.html when it kept the original content and vibe. If transformed.html does not exist, copy original.html to transformed.html with cp, then edit transformed.html in place. If a prior transformed.html became generic or lost content, restore from original.html with targeted copies or by replacing transformed.html from original.html once, then improve it.
+- Make the clearest effective accessibility change, even if it restructures the page. Prefer understandable, robust, accessible UI over preserving fragile original layout details. Keep original assets and hrefs unless broken, inaccessible, or replaced with an equivalent accessible fallback.
 - When adding CSS overrides for Tailwind-like classes that contain slash opacity, escape the slash in selectors and cover every used variant in transformed.html; examples include text-foreground/60 and bg-background/85.
 - If an issue is uncertain and changing it risks content loss or false claims, preserve the original and record the residual risk.
 - Ensure transformed.html can be served directly from the run directory without external build steps.
@@ -334,31 +219,32 @@ solver-result.json must be valid JSON. Keep at least this compatible shape and a
   ) => `You are the ${reviewer.name}. Re-review transformed.html and vote on whether this candidate should be accepted.
 
 Run directory: ${runDir}
-Use source evidence already available from your findings pass; do not re-load unchanged source artifacts wholesale.
+Use brief.md and compact current artifacts; do not re-load unchanged source artifacts wholesale.
+Your review focus: ${roleCriteria[reviewer.id] || "use the role described above."}
 Available current files:
 ${fileList([
+  join(runDir, "brief.md"),
   join(runDir, "transformed.html"),
   join(iterDir, "checks.json"),
   `${join(iterDir, "checks-full.json")} (targeted debugging only after citing a compact violation id/target)`,
-  join(iterDir, "aggregate-feedback.json"),
-  join(iterDir, "solver-task.md"),
   join(iterDir, "solver-result.json"),
 ])}
 ${TARGETED_EVIDENCE}
 Output: ${join(iterDir, "votes", `${reviewer.id}.json`)}
 
-Compare transformed.html against the original evidence, brief, findings, solver task, solver result, and automated checks. Vote on both accessibility improvement and preservation quality.
+Compare transformed.html against the original evidence, brief, solver result, and automated checks. Vote on accessibility improvement, task success, content retention, and recognizable brand vibe. Do not penalize layout changes by themselves.
 
 Accept only when:
 - checks.json passes, including axe, one h1, main, and no mobile horizontal overflow;
-- your role's important findings were fixed or credibly reduced;
+- your role's important concerns are fixed or credibly reduced;
 - no high-impact accessibility regression was introduced;
-- original brand identity, section order, substantive copy, CTAs, links, images/logos, schedule details, judging criteria, and partner information are acceptably preserved;
+- substantive copy, CTAs, links, important images/logos, key details, and partner information are retained or accessibly replaced;
+- layout changes, restyling, regrouping, and simplified structure improve accessibility while keeping the site purpose and vibe recognizable;
 - the page remains task-specific and does not read like a generic replacement.
 
-Vote revise when a fix is close but still has concrete remediable issues, such as weak focus styling, ambiguous CTA/link text, missing alt nuance, moderate contrast/reflow risk, or partial content preservation.
+Vote revise when a fix is close but still has concrete remediable issues, such as weak focus styling, ambiguous CTA/link text, missing alt nuance, moderate contrast/reflow risk, lost important content, or loss of recognizable vibe. Do not vote revise solely because the layout changed.
 
-Vote block when there is a serious accessibility failure, checks fail, important content was dropped, links/images were lost, brand identity was flattened, CTA meaning became ambiguous, schedule/judging/partner information disappeared, solver removed content merely to pass axe, or the page only passes automated checks while failing human accessibility/preservation review.
+Vote block when there is a serious accessibility failure, checks fail, important content was dropped, links/images were lost, brand vibe disappeared, CTA meaning became ambiguous, key information disappeared, solver removed content merely to pass axe, or the page only passes automated checks while failing human accessibility/task review.
 
 Score 0-100. Suggested scale: 90-100 accept with minor residual risk; 70-89 revise; below 70 block for serious issue or destructive simplification. The reason must be short but specific, citing evidence such as check failure, missing content, element text, or remaining issue.
 
@@ -373,14 +259,13 @@ Write exactly this tiny JSON shape:
   }) => `You are the swarm orchestrator. Decide whether iteration ${iteration} is done. Do not accept merely because automated checks pass.
 
 Run directory: ${runDir}
-Use the brief, aggregate feedback, and solver task already in this orchestrator session; do not re-load unchanged source artifacts wholesale.
+Use the brief and current compact artifacts; do not re-load unchanged source artifacts wholesale.
 Available current files:
 ${fileList([
+  join(runDir, "brief.md"),
   join(iterDir, "checks.json"),
   join(iterDir, "solver-result.json"),
   `${join(iterDir, "votes")}/*.json`,
-  `${join(iterDir, "aggregate-feedback.json")} (targeted clarification only)`,
-  `${join(iterDir, "solver-task.md")} (targeted clarification only)`,
 ])}
 Output: ${join(iterDir, "decision.json")}
 
@@ -389,45 +274,13 @@ Write exactly this JSON shape:
 
 Decision rules:
 - checksPass must reflect checks.json, not reviewer optimism.
-- Use accept only when checks pass, there are no block votes, reviewers mostly accept, accessibility is materially improved, and preservation is acceptable against the brief and solver-task.
-- Use continue when checks fail, important findings remain fixable, reviewers request revise, or the candidate passes axe but still drops content, loses links/images, flattens brand identity, has ambiguous CTAs, or looks like a generic page.
+- Use accept only when checks pass, there are no block votes, reviewers mostly accept, accessibility is materially improved, core content/tasks remain intact, and the brand vibe is recognizable.
+- Use continue when checks fail, important findings remain fixable, reviewers request revise, or the candidate passes axe but still drops important content, loses links/images, loses brand vibe, has ambiguous CTAs, breaks task flow, or looks like a generic page.
 - Treat failed axe color-contrast as fixable after a color/theme change unless the failure has already persisted through a targeted color-repair iteration or the run has exhausted its iteration budget.
 - Use stop_with_risks only when further iterations are unlikely to improve within this run, and explain the residual risks clearly.
-- If the transformed page appears worse than original or destructive, prefer continue unless retry limits or repeated failures make stop_with_risks more honest.
+- If the transformed page appears worse than original, destructive, generic, or content-poor, prefer continue unless retry limits or repeated failures make stop_with_risks more honest. Do not continue solely because layout changed.
 
 The reason should mention the decisive evidence: automated pass/fail, accept/block counts, major unresolved accessibility items, and preservation status.`,
-  // Reports should be audit-friendly, not marketing copy. They summarize compact
-  // artifacts from the completed run and avoid claiming full WCAG conformance.
-  reportPrompt: (
-    { runDir },
-    decision?: Decision,
-  ) => `You are the swarm orchestrator. Write the final accessibility remediation report. The report should be useful for auditing, not just a success message.
-
-Run directory: ${runDir}
-Final decision: ${JSON.stringify(decision || null)}
-Use source evidence, brief, aggregate summaries, and prior decisions already in this orchestrator session.
-Available final artifacts:
-${fileList([
-  `${join(runDir, "iterations")}/*/solver-result.json`,
-  `${join(runDir, "iterations")}/*/checks.json`,
-  `${join(runDir, "iterations")}/*/votes/*.json`,
-  `${join(runDir, "iterations")}/*/decision.json`,
-  `${join(runDir, "transformed.html")} (targeted inspection only)`,
-])}
-Prefer compact artifacts and the latest iteration by default; inspect transformed.html or older iterations only as needed for concrete report evidence.
-Outputs:
-- ${join(runDir, "report.md")}
-- ${join(runDir, "report.html")}
-
-report.md should be concise but evidence-first. Include:
-- final outcome and whether automated checks passed;
-- what accessibility improved by category: semantic/screen reader, keyboard/motor, cognitive/task clarity, visual/low vision/responsive;
-- preservation assessment: what original content, CTAs, links, images/logos, schedule details, judging criteria, partners, and brand feel were preserved; identify any justified removals such as Lovable badge or decorative duplicates;
-- residual risks and limitations: issues not covered by axe, manual checks not performed, dynamic states not observed, uncertain semantic judgments, contrast/zoom/mobile caveats, or content that may need human verification;
-- reviewer vote summary and any stop_with_risks rationale;
-- link/reference to transformed.html and key artifacts.
-
-report.html should be simple standalone HTML linking to transformed.html and artifacts. Do not overstate compliance. Say that passing axe is required evidence, not a full WCAG conformance claim. Write only these report files.`,
 };
 
 async function scan(url: string, { runDir }: { runDir: string }) {
