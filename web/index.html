@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Accessibility Swarm</title>
+    <link
+      rel="preload"
+      href="/fonts/inter-400.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <style>
+      /* ===== Fonts ==================================================== */
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("/fonts/inter-400.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("/fonts/inter-600.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("/fonts/inter-700.woff2") format("woff2");
+      }
+
+      /* ===== Design tokens (see design.md) ============================ */
+      :root {
+        --color-primary: #003580;
+        --color-primary-dark: #00265c;
+        --color-primary-darker: #001a40;
+        --color-primary-tint: #e6ebf3;
+        --color-accent: #7b2d8e;
+
+        --color-text: #1a1a1a;
+        --color-text-muted: #595959;
+        --color-text-inverse: #ffffff;
+        --color-surface: #ffffff;
+        --color-surface-subtle: #f3f3f3;
+        --color-border: #c9c9c9;
+        --color-border-input: #595959;
+
+        --color-success: #0a7d3c;
+        --color-warning: #8a6100;
+        --color-error: #b3171f;
+        --color-error-bg: #fae7e8;
+
+        --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial,
+          "Liberation Sans", system-ui, sans-serif;
+        --text-xs: 0.875rem;
+        --text-sm: 1rem;
+        --text-base: 1.125rem;
+        --text-lg: 1.375rem;
+        --text-xl: 1.75rem;
+        --text-2xl: 2.25rem;
+
+        --space-1: 0.25rem;
+        --space-2: 0.5rem;
+        --space-3: 0.75rem;
+        --space-4: 1rem;
+        --space-5: 1.5rem;
+        --space-6: 2rem;
+        --space-7: 3rem;
+
+        --layout-max: 760px;
+        --focus-color: #1a1a1a;
+      }
+
+      /* ===== Base ===================================================== */
+      * { box-sizing: border-box; }
+      html { font-size: 100%; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--color-surface);
+        color: var(--color-text);
+        font-family: var(--font-sans);
+        font-size: var(--text-base);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      :focus-visible {
+        outline: 3px solid var(--focus-color);
+        outline-offset: 2px;
+      }
+
+      .col {
+        width: 100%;
+        max-width: var(--layout-max);
+        margin: 0 auto;
+        padding-left: var(--space-5);
+        padding-right: var(--space-5);
+      }
+
+      .skip-link {
+        position: absolute;
+        left: var(--space-4);
+        top: -100px;
+        background: var(--color-surface);
+        color: var(--color-primary);
+        font-weight: 700;
+        padding: var(--space-3) var(--space-4);
+        border: 2px solid var(--color-primary);
+      }
+      .skip-link:focus { top: var(--space-3); }
+
+      /* ===== Header =================================================== */
+      .site-header {
+        background: var(--color-primary);
+        color: var(--color-text-inverse);
+      }
+      .site-header .col {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-4);
+        padding-top: var(--space-5);
+        padding-bottom: var(--space-5);
+      }
+      .wordmark {
+        font-size: var(--text-xl);
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .site-tag {
+        font-size: var(--text-xs);
+        font-weight: 700;
+        line-height: 1.4;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.78);
+        white-space: nowrap;
+      }
+      .accent { height: 3px; background: var(--color-accent); }
+
+      /* ===== Main ===================================================== */
+      main { flex: 1; padding-top: var(--space-7); padding-bottom: var(--space-7); }
+
+      h1 {
+        margin: 0 0 var(--space-3);
+        font-size: var(--text-2xl);
+        font-weight: 700;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+      }
+      h2 {
+        margin: 0 0 var(--space-4);
+        font-size: var(--text-xl);
+        font-weight: 700;
+        line-height: 1.25;
+        letter-spacing: -0.01em;
+      }
+      h3 {
+        margin: var(--space-6) 0 var(--space-3);
+        font-size: var(--text-lg);
+        font-weight: 600;
+        line-height: 1.3;
+        letter-spacing: -0.01em;
+      }
+      .lede {
+        margin: 0 0 var(--space-6);
+        max-width: 60ch;
+        color: var(--color-text-muted);
+        font-size: var(--text-lg);
+        line-height: 1.5;
+      }
+
+      /* ===== Form ===================================================== */
+      .field { margin-bottom: var(--space-5); }
+      .field label {
+        display: block;
+        margin-bottom: var(--space-1);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        line-height: 1.5;
+      }
+      .field__help {
+        margin: 0 0 var(--space-3);
+        color: var(--color-text-muted);
+        font-size: var(--text-sm);
+      }
+      .search { display: flex; gap: var(--space-2); }
+      .search input {
+        flex: 1;
+        min-width: 0;
+        min-height: 48px;
+        padding: var(--space-3);
+        background: var(--color-surface);
+        border: 2px solid var(--color-border-input);
+        border-radius: 0;
+        color: var(--color-text);
+        font-family: inherit;
+        font-size: var(--text-base);
+      }
+      .search input:focus { border-color: var(--color-primary); }
+      .search input:disabled { background: var(--color-surface-subtle); }
+      .search input::placeholder { color: var(--color-text-muted); }
+
+      /* ===== Buttons ================================================== */
+      .btn {
+        min-height: 48px;
+        padding: var(--space-3) var(--space-5);
+        border: 2px solid transparent;
+        border-radius: 0;
+        font-family: inherit;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        line-height: 1.2;
+        cursor: pointer;
+        transition: background 160ms ease;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--color-primary);
+        color: var(--color-text-inverse);
+      }
+      .btn-primary:hover:not(:disabled) { background: var(--color-primary-dark); }
+      .btn-primary:active:not(:disabled) { background: var(--color-primary-darker); }
+      .btn-secondary {
+        background: var(--color-surface);
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+      }
+      .btn-secondary:hover:not(:disabled) { background: var(--color-primary-tint); }
+      .btn:disabled { opacity: 0.55; cursor: default; }
+
+      /* ===== Run panel ================================================ */
+      .panel { margin-top: var(--space-7); }
+      .runhead {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        padding-bottom: var(--space-4);
+        border-bottom: 1px solid var(--color-border);
+        margin-bottom: var(--space-5);
+      }
+      .dot {
+        width: 12px;
+        height: 12px;
+        flex: none;
+        background: var(--color-text-muted);
+      }
+      .dot.running { background: var(--color-primary); }
+      .dot.completed { background: var(--color-success); }
+      .dot.failed { background: var(--color-error); }
+      .dot.stopped { background: var(--color-warning); }
+      #phase { font-weight: 700; }
+      #target {
+        flex: 1;
+        min-width: 0;
+        color: var(--color-text-muted);
+        font-size: var(--text-sm);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* ===== Statistics =============================================== */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+        gap: var(--space-3);
+        margin-bottom: var(--space-5);
+      }
+      .tile {
+        padding: var(--space-4);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+      }
+      .tile__label {
+        display: block;
+        font-size: var(--text-xs);
+        font-weight: 700;
+        line-height: 1.4;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+      }
+      .tile__value {
+        display: block;
+        margin-top: var(--space-2);
+        font-size: var(--text-xl);
+        font-weight: 700;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+      }
+      .tile__value.good { color: var(--color-success); }
+      .tile__sub {
+        display: block;
+        margin-top: var(--space-1);
+        font-size: var(--text-xs);
+        color: var(--color-text-muted);
+      }
+
+      /* ===== Activity log ============================================= */
+      .log {
+        list-style: none;
+        margin: 0;
+        padding: var(--space-4);
+        max-height: 320px;
+        overflow-y: auto;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        font-size: var(--text-sm);
+      }
+      .log:empty::after {
+        content: "Waiting for the swarm to start\2026";
+        color: var(--color-text-muted);
+      }
+      .log li {
+        display: flex;
+        gap: var(--space-4);
+        padding: 2px 0;
+      }
+      .log time {
+        flex: none;
+        width: 5.5rem;
+        color: var(--color-text-muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .log .msg { color: var(--color-text-muted); }
+      .log .info .msg { color: var(--color-text); }
+      .log .good .msg { color: var(--color-success); }
+      .log .warn .msg { color: var(--color-warning); }
+      .log .bad .msg { color: var(--color-error); }
+
+      /* ===== Result =================================================== */
+      .result {
+        margin-top: var(--space-6);
+        padding: var(--space-5);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-left: 4px solid var(--color-primary);
+      }
+      .result.completed { border-left-color: var(--color-success); }
+      .result.failed { border-left-color: var(--color-error); }
+      .result.stopped { border-left-color: var(--color-warning); }
+      .result h2 { margin-bottom: var(--space-2); }
+      .result p {
+        margin: 0 0 var(--space-4);
+        max-width: 70ch;
+        color: var(--color-text-muted);
+      }
+      .result__link {
+        font-weight: 700;
+        color: var(--color-primary);
+      }
+      .result__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2) var(--space-5);
+      }
+
+      /* ===== Notice =================================================== */
+      .notice {
+        margin-top: var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        background: var(--color-error-bg);
+        border-left: 4px solid var(--color-error);
+        font-size: var(--text-sm);
+      }
+
+      /* ===== Footer =================================================== */
+      .site-footer {
+        background: var(--color-primary-darker);
+        color: var(--color-text-inverse);
+      }
+      .site-footer .col {
+        padding-top: var(--space-7);
+        padding-bottom: var(--space-7);
+      }
+      .site-footer__title { margin: 0 0 var(--space-2); font-weight: 700; }
+      .site-footer p:last-child {
+        margin: 0;
+        max-width: 62ch;
+        color: rgba(255, 255, 255, 0.82);
+        font-size: var(--text-sm);
+      }
+
+      a { color: var(--color-primary); }
+      [hidden] { display: none !important; }
+
+      @media (max-width: 540px) {
+        .search { flex-direction: column; }
+        .search .btn { width: 100%; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <a href="#main" class="skip-link">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="col">
+        <span class="wordmark">Accessibility Swarm</span>
+        <span class="site-tag">AI for Good</span>
+      </div>
+    </header>
+    <div class="accent" aria-hidden="true"></div>
+
+    <main id="main" class="col">
+      <h1>Audit a page for accessibility</h1>
+      <p class="lede">
+        Paste a public page address. A team of review agents audits it,
+        rewrites it to be more accessible, and reports what changed.
+      </p>
+
+      <form id="form" autocomplete="off" novalidate>
+        <div class="field">
+          <label for="url">Page URL</label>
+          <p id="url-help" class="field__help">
+            Enter a public http:// or https:// page address.
+          </p>
+          <div class="search">
+            <input
+              id="url"
+              type="url"
+              placeholder="https://your-page.example"
+              aria-describedby="url-help"
+            />
+            <button id="start" type="submit" class="btn btn-primary">
+              Start audit
+            </button>
+          </div>
+        </div>
+      </form>
+      <p id="error" class="notice" role="alert" hidden></p>
+
+      <section id="panel" class="panel" hidden aria-labelledby="panel-title">
+        <h2 id="panel-title">Run progress</h2>
+        <div class="runhead">
+          <span id="dot" class="dot" aria-hidden="true"></span>
+          <span id="phase" aria-live="polite">Starting</span>
+          <span id="target"></span>
+          <button id="stop" type="button" class="btn btn-secondary" hidden>
+            Stop run
+          </button>
+        </div>
+
+        <div class="stats" id="stats">
+          <div class="tile">
+            <span class="tile__label">Elapsed</span>
+            <span class="tile__value" id="s-elapsed">0:00</span>
+            <span class="tile__sub">running time</span>
+          </div>
+          <div class="tile">
+            <span class="tile__label">Iteration</span>
+            <span class="tile__value" id="s-iter">—</span>
+            <span class="tile__sub" id="s-iter-sub">not started</span>
+          </div>
+          <div class="tile">
+            <span class="tile__label">Axe issues</span>
+            <span class="tile__value" id="s-axe">—</span>
+            <span class="tile__sub" id="s-axe-sub">awaiting check</span>
+          </div>
+          <div class="tile">
+            <span class="tile__label">Failing checks</span>
+            <span class="tile__value" id="s-checks">—</span>
+            <span class="tile__sub" id="s-checks-sub">awaiting check</span>
+          </div>
+          <div class="tile">
+            <span class="tile__label">Reviewer votes</span>
+            <span class="tile__value" id="s-votes">—</span>
+            <span class="tile__sub" id="s-votes-sub">accept to ship</span>
+          </div>
+        </div>
+
+        <h3 class="block-title">Activity</h3>
+        <ol id="log" class="log"></ol>
+      </section>
+
+      <section id="result" class="result" hidden aria-live="polite">
+        <h2 id="result-title"></h2>
+        <p id="result-text"></p>
+        <div class="result__actions">
+          <a id="result-link" class="result__link" href="#" target="_blank"
+            rel="noreferrer">Open the improved page →</a
+          >
+          <a id="result-report" class="result__link" href="#" target="_blank"
+            rel="noreferrer">View the full report →</a
+          >
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="col">
+        <p class="site-footer__title">Accessibility Swarm</p>
+        <p>
+          An experimental tool that audits web pages and rewrites them to be
+          more accessible. Results are supporting evidence — not a formal WCAG
+          conformance statement. Always confirm findings with manual testing.
+        </p>
+      </div>
+    </footer>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const form = $("form");
+      const urlInput = $("url");
+      const startBtn = $("start");
+      const stopBtn = $("stop");
+      const errorEl = $("error");
+      const panel = $("panel");
+      const dot = $("dot");
+      const phaseEl = $("phase");
+      const targetEl = $("target");
+      const log = $("log");
+      const result = $("result");
+
+      // --- run statistics -----------------------------------------------
+      const run = {
+        startedAt: 0,
+        maxIterations: 0,
+        reviewers: 0,
+        iteration: 0,
+        axe: null,
+        failing: null,
+        votes: {},
+        elapsedMs: null,
+        timer: null,
+      };
+
+      function escapeHtml(text) {
+        return String(text).replace(
+          /[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+        );
+      }
+
+      function formatElapsed(ms) {
+        const total = Math.max(0, Math.floor(ms / 1000));
+        const m = Math.floor(total / 60);
+        const s = String(total % 60).padStart(2, "0");
+        if (m < 60) return m + ":" + s;
+        return (
+          Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0") + ":" + s
+        );
+      }
+
+      function setStatus(status) {
+        dot.className = "dot " + status;
+        const running = status === "running";
+        startBtn.disabled = running;
+        urlInput.disabled = running;
+        startBtn.textContent = running ? "Running…" : "Start audit";
+        stopBtn.hidden = !running;
+        stopBtn.disabled = false;
+        stopBtn.textContent = "Stop run";
+      }
+
+      function renderStats() {
+        $("s-iter").textContent = run.iteration || "—";
+        $("s-iter-sub").textContent = run.maxIterations
+          ? "of " + run.maxIterations + " planned"
+          : "not started";
+
+        const axe = $("s-axe");
+        axe.textContent = run.axe == null ? "—" : run.axe;
+        axe.classList.toggle("good", run.axe === 0);
+        $("s-axe-sub").textContent =
+          run.axe == null ? "awaiting check" : "axe violations";
+
+        const checks = $("s-checks");
+        checks.textContent = run.failing == null ? "—" : run.failing;
+        checks.classList.toggle("good", run.failing === 0);
+        $("s-checks-sub").textContent =
+          run.failing == null ? "awaiting check" : "checks failing";
+
+        const accepts = Object.values(run.votes).filter(
+          (v) => v === "accept",
+        ).length;
+        const cast = Object.keys(run.votes).length;
+        $("s-votes").textContent = cast ? accepts + " ✓" : "—";
+        $("s-votes-sub").textContent = run.reviewers
+          ? accepts + " of " + run.reviewers + " reviewers"
+          : "accept to ship";
+      }
+
+      function updateElapsed() {
+        const ms =
+          run.elapsedMs != null ? run.elapsedMs : Date.now() - run.startedAt;
+        $("s-elapsed").textContent = formatElapsed(ms);
+      }
+
+      function startTimer() {
+        stopTimer();
+        updateElapsed();
+        run.timer = setInterval(updateElapsed, 1000);
+      }
+      function stopTimer() {
+        if (run.timer) clearInterval(run.timer);
+        run.timer = null;
+      }
+
+      function resetRun(target, startedAt) {
+        log.innerHTML = "";
+        result.hidden = true;
+        errorEl.hidden = true;
+        panel.hidden = false;
+        targetEl.textContent = target || "";
+        phaseEl.textContent = "Starting";
+        Object.assign(run, {
+          startedAt: startedAt || Date.now(),
+          maxIterations: 0,
+          reviewers: 0,
+          iteration: 0,
+          axe: null,
+          failing: null,
+          votes: {},
+          elapsedMs: null,
+        });
+        renderStats();
+        updateElapsed();
+      }
+
+      function addLine(level, text) {
+        const li = document.createElement("li");
+        li.className = level;
+        li.innerHTML =
+          "<time>" +
+          new Date().toLocaleTimeString() +
+          '</time><span class="msg">' +
+          escapeHtml(text).slice(0, 400) +
+          "</span>";
+        log.appendChild(li);
+        while (log.children.length > 220) log.removeChild(log.firstChild);
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function setLink(el, url) {
+        if (url) {
+          el.hidden = false;
+          el.href = url;
+        } else {
+          el.hidden = true;
+        }
+      }
+
+      function showResult(status, title, text, url, reportUrl) {
+        result.hidden = false;
+        result.className = "result " + status;
+        $("result-title").textContent = title;
+        $("result-text").textContent = text;
+        setLink($("result-link"), url);
+        setLink($("result-report"), reportUrl);
+      }
+
+      // Fold one event into the statistics and return a log line (or null).
+      function describe(ev) {
+        switch (ev.type) {
+          case "run_start":
+            run.maxIterations = ev.maxIterations || 0;
+            run.reviewers = Array.isArray(ev.reviewers)
+              ? ev.reviewers.length
+              : 0;
+            renderStats();
+            return {
+              level: "info",
+              phase: "Scanning the page",
+              text:
+                "Run started · model " +
+                (ev.model || "?") +
+                " · " +
+                run.reviewers +
+                " reviewers",
+            };
+          case "phase":
+            if (ev.phase !== "scan") return null;
+            if (ev.status === "start")
+              return { level: "info", phase: "Scanning the page", text: "Scanning the page" };
+            if (ev.status === "completed")
+              return { level: "good", text: "Scan complete" };
+            if (ev.status === "failed")
+              return { level: "bad", text: "Scan failed: " + (ev.error || "") };
+            return null;
+          case "iteration":
+            if (ev.status === "active") {
+              run.iteration = ev.iteration || run.iteration;
+              renderStats();
+              return {
+                level: "info",
+                phase: "Iteration " + ev.iteration + " of " + ev.maxIterations,
+                text: "Iteration " + ev.iteration + " started",
+              };
+            }
+            if (ev.status === "completed")
+              return {
+                level: "info",
+                text: "Iteration " + ev.iteration + " → " + ev.outcome,
+              };
+            return null;
+          case "check":
+            if (ev.status === "start")
+              return { level: null, phase: "Running checks", text: "Running automated checks" };
+            if (typeof ev.axeViolations === "number") run.axe = ev.axeViolations;
+            if (typeof ev.failures === "number") run.failing = ev.failures;
+            renderStats();
+            if (ev.status === "passed")
+              return { level: "good", text: "Automated checks passed" };
+            if (ev.status === "failed")
+              return {
+                level: "warn",
+                text:
+                  "Automated checks failed · " + (ev.failures || 0) + " issue(s)",
+              };
+            return null;
+          case "reviewer":
+            if (ev.phase === "vote" && ev.vote) {
+              run.votes[ev.id] = ev.vote;
+              renderStats();
+              return {
+                level: "info",
+                text: "Reviewer " + ev.id + " voted " + ev.vote,
+              };
+            }
+            return { level: null, text: "Reviewer " + ev.id + " filed findings" };
+          case "decision":
+            return {
+              level: ev.outcome === "accept" ? "good" : "warn",
+              text: "Decision: " + ev.outcome + " — " + (ev.reason || ""),
+            };
+          case "progress":
+            return { level: null, text: ev.phase + ": " + ev.message };
+          case "serve":
+            return { level: null, text: "Preview server on " + ev.localUrl };
+          case "log":
+            return { level: null, text: ev.text };
+          case "error":
+          case "fatal":
+            return { level: "bad", text: "Error: " + ev.message };
+          default:
+            return null;
+        }
+      }
+
+      function onEvent(ev) {
+        if (ev.type === "snapshot") {
+          if (ev.status === "idle") {
+            setStatus("idle");
+            panel.hidden = true;
+            return;
+          }
+          resetRun(ev.target, ev.startedAt);
+          setStatus(ev.status);
+          if (ev.status === "running") startTimer();
+          return;
+        }
+        if (ev.type === "web_start") {
+          resetRun(ev.target, ev.startedAt);
+          setStatus("running");
+          startTimer();
+          return;
+        }
+        if (ev.type === "run_complete") {
+          const decision = ev.decision || {};
+          const base = (ev.localUrl || "").replace(/\/$/, "");
+          showResult(
+            "completed",
+            "An improved version is ready",
+            "Outcome: " +
+              (decision.outcome || "done") +
+              (decision.reason ? " — " + decision.reason : ""),
+            ev.localUrl,
+            base ? base + "/report.html" : null,
+          );
+          return;
+        }
+        if (ev.type === "web_done") {
+          stopTimer();
+          if (typeof ev.elapsedMs === "number") {
+            run.elapsedMs = ev.elapsedMs;
+            updateElapsed();
+          }
+          setStatus(ev.status);
+          if (ev.status === "completed") {
+            phaseEl.textContent = "Run complete";
+          } else if (ev.status === "stopped") {
+            phaseEl.textContent = "Run stopped";
+            showResult(
+              "stopped",
+              "Run stopped",
+              "You stopped this run before it finished.",
+              null,
+            );
+          } else {
+            phaseEl.textContent = "Run failed";
+            showResult(
+              "failed",
+              "The run did not finish",
+              ev.message || "Something went wrong before a result was produced.",
+              null,
+            );
+          }
+          return;
+        }
+        const line = describe(ev);
+        if (!line) return;
+        if (line.phase) phaseEl.textContent = line.phase;
+        if (line.text) addLine(line.level || "dim", line.text);
+      }
+
+      // --- wiring --------------------------------------------------------
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errorEl.hidden = true;
+        const url = urlInput.value.trim();
+        if (!url) {
+          errorEl.textContent = "Enter a URL first.";
+          errorEl.hidden = false;
+          return;
+        }
+        try {
+          const res = await fetch("/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            errorEl.textContent = data.error || "Could not start the run.";
+            errorEl.hidden = false;
+          }
+          // On success the SSE `web_start` event takes over the UI.
+        } catch {
+          errorEl.textContent = "Could not reach the server.";
+          errorEl.hidden = false;
+        }
+      });
+
+      stopBtn.addEventListener("click", async () => {
+        stopBtn.disabled = true;
+        stopBtn.textContent = "Stopping…";
+        try {
+          await fetch("/stop", { method: "POST" });
+        } catch {
+          /* the web_done event will settle the UI regardless */
+        }
+      });
+
+      const source = new EventSource("/events");
+      source.onmessage = (e) => {
+        try {
+          onEvent(JSON.parse(e.data));
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
+
+      setStatus("idle");
+    </script>
+  </body>
+</html>

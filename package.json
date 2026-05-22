@@ -9,6 +9,7 @@
     "test:core": "npm run build && node --test test/core.test.mjs",
     "swarm": "npm run build && node dist/index.js",
     "swarm:tui": "npm run build && cargo run --quiet --manifest-path tui/Cargo.toml --",
+    "swarm:web": "bash start.sh",
     "tiny": "npm run build && node dist/index.js",
     "setup:browsers": "playwright install chromium",
     "setup:browsers:linux": "playwright install --with-deps chromium",
