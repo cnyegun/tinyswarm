@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tiny Rewrite — how the swarm works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans+Condensed:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  /* ─── design tokens — borrowed from valtioneuvosto.fi ─────────── */
+  :root {
+    --navy:   #002f6c;   /* headings, agent-driven steps    */
+    --blue:   #365abd;   /* links, connectors, code steps   */
+    --bright: #00a2ea;   /* secondary accent                */
+    --tint:   #ebeff8;   /* panel fill                      */
+    --line:   #d8def1;   /* hairline borders                */
+    --ink:    #1a1a1a;   /* body text                       */
+    --muted:  #727c81;   /* secondary text                  */
+    --alert:  #b3261e;   /* fail / block                    */
+    --white:  #fff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--white);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    justify-content: center;
+    padding: 40px 24px;
+  }
+  .scroll { overflow-x: auto; }
+
+  /* ─── the figure ─────────────────────────────────────────────── */
+  figure {
+    margin: 0;
+    width: 880px;
+    min-width: 880px;
+  }
+  figcaption { margin-bottom: 26px; }
+  .kicker {
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-size: .8rem; font-weight: 600;
+    letter-spacing: .16em; text-transform: uppercase;
+    color: var(--blue);
+    margin: 0 0 4px;
+  }
+  figcaption h1 {
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-weight: 700;
+    font-size: 2rem;
+    color: var(--navy);
+    margin: 0;
+    letter-spacing: .005em;
+  }
+  figcaption p {
+    margin: 7px 0 0;
+    max-width: 64ch;
+    color: var(--muted);
+    font-size: .96rem;
+  }
+  figcaption .cmd {
+    margin-top: 12px;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: .82rem;
+    color: var(--navy);
+    background: var(--tint);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 6px 11px;
+    display: inline-block;
+  }
+
+  /* ─── stage card (scan / brief / report / serve) ─────────────── */
+  .stage {
+    display: flex; align-items: center; gap: 18px;
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-left: 5px solid var(--blue);
+    padding: 14px 20px;
+  }
+  .stage.agent { border-left-color: var(--navy); }
+  .stage .ix {
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-weight: 700; font-size: 1.5rem;
+    color: var(--line);
+    flex: none; width: 30px;
+  }
+  .stage .body { flex: 1; }
+  .stage .nm {
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-weight: 700; font-size: 1.18rem;
+    color: var(--navy);
+    letter-spacing: .03em;
+  }
+  .stage .ds { font-size: .9rem; color: var(--muted); }
+  .stage .meta {
+    flex: none; text-align: right;
+    font-size: .78rem; color: var(--muted);
+    max-width: 290px;
+  }
+  .stage .meta .files { color: var(--blue); font-family: ui-monospace, Menlo, monospace; font-size: .73rem; }
+
+  /* type tag */
+  .tag {
+    display: inline-block;
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-size: .66rem; font-weight: 600;
+    letter-spacing: .11em; text-transform: uppercase;
+    padding: 1px 7px; border-radius: 2px;
+    vertical-align: 1px;
+  }
+  .tag.agent { background: var(--navy); color: var(--white); }
+  .tag.auto  { background: var(--tint); color: var(--blue); border: 1px solid var(--line); }
+
+  /* ─── vertical connector ─────────────────────────────────────── */
+  .link {
+    position: relative;
+    height: 38px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .link::before {
+    content: ""; position: absolute;
+    top: 0; bottom: 8px; left: 50%;
+    width: 2px; transform: translateX(-50%);
+    background: var(--blue);
+  }
+  .link::after {
+    content: ""; position: absolute;
+    bottom: 0; left: 50%; transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--blue);
+  }
+  .link .note {
+    position: relative; z-index: 1;
+    background: var(--white);
+    font-size: .8rem; color: var(--navy);
+    padding: 2px 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    font-weight: 600;
+  }
+  .link .note b { color: var(--blue); }
+
+  /* ─── the loop panel ─────────────────────────────────────────── */
+  .loop {
+    background: var(--tint);
+    border: 1px solid var(--line);
+  }
+  .loop-hd {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 13px 22px;
+    background: var(--navy);
+    color: var(--white);
+  }
+  .loop-hd .t {
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-weight: 700; font-size: 1.16rem;
+    letter-spacing: .04em;
+  }
+  .loop-hd .r {
+    margin-left: auto;
+    font-size: .8rem;
+    color: #b9c6e0;
+    letter-spacing: .02em;
+  }
+  .loop-hd .r b { color: var(--white); }
+  .loop-inner { padding: 16px 26px 26px; }
+
+  /* conditional shortcut band (dashed ⊓) */
+  .fail-band {
+    position: relative;
+    height: 38px;
+    margin: 0 12.5% 0 37.5%;
+    border: 2px dashed var(--alert);
+    border-bottom: 0;
+    border-radius: 9px 9px 0 0;
+  }
+  .fail-band::after {           /* arrowhead down, into DECISION */
+    content: ""; position: absolute;
+    right: -6px; bottom: -1px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid var(--alert);
+  }
+  .fail-band .lbl {
+    position: absolute; top: -11px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--tint);
+    padding: 0 9px;
+    font-size: .76rem; font-weight: 600;
+    color: var(--alert);
+    white-space: nowrap;
+  }
+
+  /* the four cycle steps */
+  .cycle {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    align-items: stretch;
+    position: relative;
+  }
+  .step {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--blue);
+    padding: 13px 13px 14px;
+    margin: 0 13px;
+  }
+  .step.agent { border-top-color: var(--navy); }
+  .step .sx {
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-size: .66rem; font-weight: 600;
+    letter-spacing: .12em; color: var(--muted);
+  }
+  .step .snm {
+    font-family: "Fira Sans Condensed", sans-serif;
+    font-weight: 700; font-size: 1.3rem;
+    color: var(--navy); letter-spacing: .03em;
+    margin: 1px 0 6px;
+  }
+  .step .who { font-size: .8rem; color: var(--ink); }
+  .step .wr {
+    margin-top: 8px; padding-top: 7px;
+    border-top: 1px dotted var(--line);
+    font-size: .72rem; color: var(--muted);
+  }
+  .step .wr code {
+    font-family: ui-monospace, Menlo, monospace;
+    color: var(--blue); font-size: .94em;
+  }
+  /* horizontal arrows between steps */
+  .cycle .harrow {
+    position: absolute; top: 50%;
+    transform: translateY(-50%);
+    color: var(--blue);
+    font-size: 1.1rem; line-height: 1;
+  }
+  .cycle .harrow.a1 { left: 25%;  }
+  .cycle .harrow.a2 { left: 50%;  }
+  .cycle .harrow.a3 { left: 75%;  }
+  .cycle .harrow span { transform: translateX(-50%); display: block; }
+
+  /* continue band (solid ⊔) */
+  .return-band {
+    position: relative;
+    height: 44px;
+    margin: 0 12.5%;
+    border: 2px solid var(--blue);
+    border-top: 0;
+    border-radius: 0 0 9px 9px;
+  }
+  .return-band::before {        /* arrowhead up, into FIX */
+    content: ""; position: absolute;
+    left: -6px; top: -1px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 7px solid var(--blue);
+  }
+  .return-band .lbl {
+    position: absolute; bottom: -12px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--tint);
+    padding: 0 10px;
+    font-size: .78rem; font-weight: 600;
+    color: var(--blue);
+    white-space: nowrap;
+  }
+
+  /* ─── legend ─────────────────────────────────────────────────── */
+  .legend {
+    margin-top: 22px;
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: .8rem; color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .key { width: 22px; height: 11px; flex: none; border-radius: 2px; }
+  .key.navy  { background: var(--navy); }
+  .key.blue  { background: var(--blue); }
+  .key.fail  { background: var(--white); border: 2px dashed var(--alert); }
+
+  @media print {
+    body { padding: 0; }
+    .legend { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="scroll">
+<figure>
+
+  <figcaption>
+    <p class="kicker">How it works</p>
+    <h1>Tiny Rewrite — the accessibility swarm</h1>
+    <p>A crew of LLM agents rewrites a web page for accessibility. The page is
+       scanned, a brief is written, then a fix / check / vote / decision loop runs
+       until the result is accepted — and every step writes its evidence to disk.</p>
+    <span class="cmd">$ npm run swarm -- accessibility &lt;url&gt;</span>
+  </figcaption>
+
+  <!-- 01 · SCAN -->
+  <div class="stage">
+    <span class="ix">01</span>
+    <div class="body">
+      <span class="nm">Scan</span> &nbsp;<span class="tag auto">Automated</span>
+      <div class="ds">Drive a real browser to the page and freeze it as ground truth.</div>
+    </div>
+    <div class="meta">
+      Playwright + axe-core<br>
+      <span class="files">original.html · facts.json · axe.json</span>
+    </div>
+  </div>
+
+  <div class="link"><span class="note">source captured</span></div>
+
+  <!-- 02 · BRIEF -->
+  <div class="stage agent">
+    <span class="ix">02</span>
+    <div class="body">
+      <span class="nm">Brief</span> &nbsp;<span class="tag agent">Agent</span>
+      <div class="ds">The orchestrator turns raw evidence into one shared task framing.</div>
+    </div>
+    <div class="meta">
+      Orchestrator agent<br>
+      <span class="files">brief.md</span>
+    </div>
+  </div>
+
+  <div class="link"><span class="note">brief shared with every agent</span></div>
+
+  <!-- 03 · THE LOOP -->
+  <section class="loop">
+    <header class="loop-hd">
+      <span class="t">03 · THE LOOP</span>
+      <span class="r">repeats up to <b>3</b> iterations · exits early on <b>accept</b></span>
+    </header>
+    <div class="loop-inner">
+
+      <!-- conditional: failed checks skip the vote -->
+      <div class="fail-band">
+        <span class="lbl">checks fail → skip the vote</span>
+      </div>
+
+      <!-- fix → check → vote → decision -->
+      <div class="cycle">
+        <article class="step agent">
+          <div class="sx">STEP A</div>
+          <div class="snm">Fix</div>
+          <div class="who">Fixer agent rewrites the page.</div>
+          <div class="wr">writes <code>transformed.html</code> + <code>solver-result.json</code></div>
+        </article>
+
+        <article class="step">
+          <div class="sx">STEP B</div>
+          <div class="snm">Check</div>
+          <div class="who">Automated gate — title, one h1, main landmark, axe, mobile overflow.</div>
+          <div class="wr">writes <code>checks.json</code></div>
+        </article>
+
+        <article class="step agent">
+          <div class="sx">STEP C</div>
+          <div class="snm">Vote</div>
+          <div class="who">Two reviewer agents judge in parallel — accept, revise or block.</div>
+          <div class="wr">writes <code>votes/*.json</code></div>
+        </article>
+
+        <article class="step agent">
+          <div class="sx">STEP D</div>
+          <div class="snm">Decide</div>
+          <div class="who">Orchestrator weighs checks and votes into a verdict.</div>
+          <div class="wr">writes <code>decision.json</code></div>
+        </article>
+
+        <span class="harrow a1"><span>&rarr;</span></span>
+        <span class="harrow a2"><span>&rarr;</span></span>
+        <span class="harrow a3"><span>&rarr;</span></span>
+      </div>
+
+      <!-- continue loop-back -->
+      <div class="return-band">
+        <span class="lbl">decision = continue → re-run the fixer</span>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="link"><span class="note">decision = <b>accept</b> or <b>stop_with_risks</b> → leave the loop</span></div>
+
+  <!-- 04 · REPORT -->
+  <div class="stage">
+    <span class="ix">04</span>
+    <div class="body">
+      <span class="nm">Report</span> &nbsp;<span class="tag auto">Automated</span>
+      <div class="ds">A deterministic writer turns the run's artifacts into a readable summary.</div>
+    </div>
+    <div class="meta">
+      Local writer — no LLM call<br>
+      <span class="files">report.md · report.html</span>
+    </div>
+  </div>
+
+  <div class="link"><span class="note">report written</span></div>
+
+  <!-- 05 · SERVE -->
+  <div class="stage">
+    <span class="ix">05</span>
+    <div class="body">
+      <span class="nm">Serve</span> &nbsp;<span class="tag auto">Automated</span>
+      <div class="ds">A small HTTP server makes the rewritten page browsable.</div>
+    </div>
+    <div class="meta">
+      Local preview server<br>
+      <span class="files">http://localhost:5177</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="key navy"></i> Agent step — driven by an LLM</span>
+    <span><i class="key blue"></i> Automated step — plain code</span>
+    <span><i class="key fail"></i> Conditional path — failed checks</span>
+    <span>Every run is saved under <code style="font-family:ui-monospace,Menlo,monospace;color:var(--blue)">runs/&lt;timestamp&gt;/</code></span>
+  </div>
+
+</figure>
+</div>
+</body>
+</html>
