@@ -1,10 +1,5 @@
 import { readFileSync } from "node:fs";
 
-type CheckWithAxeViolations = {
-  axeViolations?: unknown;
-  [key: string]: unknown;
-};
-
 /** Machine-readable lifecycle event emitted for terminal dashboards and other frontends. */
 export type SwarmEvent = {
   /** Stable event discriminator (e.g. `run_start`, `prompt`, `decision`). */
@@ -80,10 +75,6 @@ export function promptOutputEvent(
     };
   }
   return undefined;
-}
-
-export function axeViolationCount(checks: CheckWithAxeViolations) {
-  return Array.isArray(checks.axeViolations) ? checks.axeViolations.length : undefined;
 }
 
 function readJsonObject(file?: string) {

@@ -7,7 +7,6 @@ import {
 } from "node:fs";
 import { basename, join, relative } from "node:path";
 import {
-  axeViolationCount,
   consoleReporter,
   emit as emitReporter,
   line as lineReporter,
@@ -406,56 +405,43 @@ async function runIteration(
 
 async function runChecks(run: RunState, iter: IterationPaths): Promise<CheckResult> {
   const checkStarted = Date.now();
-  log(run, "check", "start", { iteration: iter.iteration });
-  emit(run, { type: "check", iteration: iter.iteration, status: "start" });
+  // Single source of truth for check-phase reporting. Each status writes one
+  // log line + one event with consistent fields. The closure captures
+  // iteration/elapsedMs so the body can't drift out of sync between channels.
+  const reportCheck = (status: string, extra: Record<string, unknown> = {}) => {
+    log(run, "check", status, {
+      iteration: iter.iteration,
+      elapsedMs: Date.now() - checkStarted,
+      ...extra,
+    });
+    emit(run, { type: "check", iteration: iter.iteration, status, ...extra });
+  };
+  reportCheck("start");
   progress(run, "check", `start iteration=${iter.iteration}`);
+
   let checks: CheckResult;
   try {
     checks = await run.profile.check(run, iter.iteration);
   } catch (error) {
-    log(run, "check", "failed", {
-      iteration: iter.iteration,
-      elapsedMs: Date.now() - checkStarted,
-      error: describe(error),
-    });
-    emit(run, {
-      type: "check",
-      iteration: iter.iteration,
-      status: "failed",
-      error: describe(error),
-    });
+    reportCheck("failed", { error: describe(error) });
     throw error;
   }
   const checksFile = join(iter.iterDir, "checks.json");
   writeFileSync(checksFile, JSON.stringify(checks, null, 2));
-  log(run, "check", checks.passed ? "passed" : "failed", {
-    iteration: iter.iteration,
-    elapsedMs: Date.now() - checkStarted,
-    failures: checks.failures.length,
-    output: fileState(run.rootDir, checksFile),
-  });
-  emit(run, {
-    type: "check",
-    iteration: iter.iteration,
-    status: checks.passed ? "passed" : "failed",
+  const status = checks.passed ? "passed" : "failed";
+  reportCheck(status, {
     passed: checks.passed,
     failures: checks.failures.length,
-    axeViolations: axeViolationCount(checks),
+    axeViolations: Array.isArray(checks.axeViolations)
+      ? checks.axeViolations.length
+      : undefined,
     output: fileState(run.rootDir, checksFile),
   });
-  progress(
-    run,
-    "check",
-    `${checks.passed ? "passed" : "failed"} ${duration(checkStarted)} failures=${checks.failures.length}`,
-  );
+  progress(run, "check", `${status} ${duration(checkStarted)} failures=${checks.failures.length}`);
   for (const failure of checks.failures.slice(0, 3))
     progress(run, "check", `failure: ${failure}`);
   if (checks.failures.length > 3)
-    progress(
-      run,
-      "check",
-      `...${checks.failures.length - 3} more failures in checks.json`,
-    );
+    progress(run, "check", `...${checks.failures.length - 3} more failures in checks.json`);
   return checks;
 }
 
