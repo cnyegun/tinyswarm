@@ -1,0 +1,617 @@
+{
+  "version": "WCAG 2.2",
+  "generated": "2026-05-22T18:12:44.917Z",
+  "criteria": {
+    "1.1.1": {
+      "title": "Non-text Content",
+      "level": "A",
+      "slug": "non-text-content",
+      "file": "sc/1.1.1-non-text-content.md"
+    },
+    "1.2.1": {
+      "title": "Audio-only and Video-only (Prerecorded)",
+      "level": "A",
+      "slug": "audio-only-and-video-only-prerecorded",
+      "file": "sc/1.2.1-audio-only-and-video-only-prerecorded.md"
+    },
+    "1.2.2": {
+      "title": "Captions (Prerecorded)",
+      "level": "A",
+      "slug": "captions-prerecorded",
+      "file": "sc/1.2.2-captions-prerecorded.md"
+    },
+    "1.2.3": {
+      "title": "Audio Description or Media Alternative (Prerecorded)",
+      "level": "A",
+      "slug": "audio-description-or-media-alternative-prerecorded",
+      "file": "sc/1.2.3-audio-description-or-media-alternative-prerecorded.md"
+    },
+    "1.2.4": {
+      "title": "Captions (Live)",
+      "level": "AA",
+      "slug": "captions-live",
+      "file": "sc/1.2.4-captions-live.md"
+    },
+    "1.2.5": {
+      "title": "Audio Description (Prerecorded)",
+      "level": "AA",
+      "slug": "audio-description-prerecorded",
+      "file": "sc/1.2.5-audio-description-prerecorded.md"
+    },
+    "1.2.6": {
+      "title": "Sign Language (Prerecorded)",
+      "level": "AAA",
+      "slug": "sign-language-prerecorded",
+      "file": "sc/1.2.6-sign-language-prerecorded.md"
+    },
+    "1.2.7": {
+      "title": "Extended Audio Description (Prerecorded)",
+      "level": "AAA",
+      "slug": "extended-audio-description-prerecorded",
+      "file": "sc/1.2.7-extended-audio-description-prerecorded.md"
+    },
+    "1.2.8": {
+      "title": "Media Alternative (Prerecorded)",
+      "level": "AAA",
+      "slug": "media-alternative-prerecorded",
+      "file": "sc/1.2.8-media-alternative-prerecorded.md"
+    },
+    "1.2.9": {
+      "title": "Audio-only (Live)",
+      "level": "AAA",
+      "slug": "audio-only-live",
+      "file": "sc/1.2.9-audio-only-live.md"
+    },
+    "1.3.1": {
+      "title": "Info and Relationships",
+      "level": "A",
+      "slug": "info-and-relationships",
+      "file": "sc/1.3.1-info-and-relationships.md"
+    },
+    "1.3.2": {
+      "title": "Meaningful Sequence",
+      "level": "A",
+      "slug": "meaningful-sequence",
+      "file": "sc/1.3.2-meaningful-sequence.md"
+    },
+    "1.3.3": {
+      "title": "Sensory Characteristics",
+      "level": "A",
+      "slug": "sensory-characteristics",
+      "file": "sc/1.3.3-sensory-characteristics.md"
+    },
+    "1.3.4": {
+      "title": "Orientation",
+      "level": "AA",
+      "slug": "orientation",
+      "file": "sc/1.3.4-orientation.md"
+    },
+    "1.3.5": {
+      "title": "Identify Input Purpose",
+      "level": "AA",
+      "slug": "identify-input-purpose",
+      "file": "sc/1.3.5-identify-input-purpose.md"
+    },
+    "1.3.6": {
+      "title": "Identify Purpose",
+      "level": "AAA",
+      "slug": "identify-purpose",
+      "file": "sc/1.3.6-identify-purpose.md"
+    },
+    "1.4.1": {
+      "title": "Use of Color",
+      "level": "A",
+      "slug": "use-of-color",
+      "file": "sc/1.4.1-use-of-color.md"
+    },
+    "1.4.2": {
+      "title": "Audio Control",
+      "level": "A",
+      "slug": "audio-control",
+      "file": "sc/1.4.2-audio-control.md"
+    },
+    "1.4.3": {
+      "title": "Contrast (Minimum)",
+      "level": "AA",
+      "slug": "contrast-minimum",
+      "file": "sc/1.4.3-contrast-minimum.md"
+    },
+    "1.4.4": {
+      "title": "Resize Text",
+      "level": "AA",
+      "slug": "resize-text",
+      "file": "sc/1.4.4-resize-text.md"
+    },
+    "1.4.5": {
+      "title": "Images of Text",
+      "level": "AA",
+      "slug": "images-of-text",
+      "file": "sc/1.4.5-images-of-text.md"
+    },
+    "1.4.6": {
+      "title": "Contrast (Enhanced)",
+      "level": "AAA",
+      "slug": "contrast-enhanced",
+      "file": "sc/1.4.6-contrast-enhanced.md"
+    },
+    "1.4.7": {
+      "title": "Low or No Background Audio",
+      "level": "AAA",
+      "slug": "low-or-no-background-audio",
+      "file": "sc/1.4.7-low-or-no-background-audio.md"
+    },
+    "1.4.8": {
+      "title": "Visual Presentation",
+      "level": "AAA",
+      "slug": "visual-presentation",
+      "file": "sc/1.4.8-visual-presentation.md"
+    },
+    "1.4.9": {
+      "title": "Images of Text (No Exception)",
+      "level": "AAA",
+      "slug": "images-of-text-no-exception",
+      "file": "sc/1.4.9-images-of-text-no-exception.md"
+    },
+    "1.4.10": {
+      "title": "Reflow",
+      "level": "AA",
+      "slug": "reflow",
+      "file": "sc/1.4.10-reflow.md"
+    },
+    "1.4.11": {
+      "title": "Non-text Contrast",
+      "level": "AA",
+      "slug": "non-text-contrast",
+      "file": "sc/1.4.11-non-text-contrast.md"
+    },
+    "1.4.12": {
+      "title": "Text Spacing",
+      "level": "AA",
+      "slug": "text-spacing",
+      "file": "sc/1.4.12-text-spacing.md"
+    },
+    "1.4.13": {
+      "title": "Content on Hover or Focus",
+      "level": "AA",
+      "slug": "content-on-hover-or-focus",
+      "file": "sc/1.4.13-content-on-hover-or-focus.md"
+    },
+    "2.1.1": {
+      "title": "Keyboard",
+      "level": "A",
+      "slug": "keyboard",
+      "file": "sc/2.1.1-keyboard.md"
+    },
+    "2.1.2": {
+      "title": "No Keyboard Trap",
+      "level": "A",
+      "slug": "no-keyboard-trap",
+      "file": "sc/2.1.2-no-keyboard-trap.md"
+    },
+    "2.1.3": {
+      "title": "Keyboard (No Exception)",
+      "level": "AAA",
+      "slug": "keyboard-no-exception",
+      "file": "sc/2.1.3-keyboard-no-exception.md"
+    },
+    "2.1.4": {
+      "title": "Character Key Shortcuts",
+      "level": "A",
+      "slug": "character-key-shortcuts",
+      "file": "sc/2.1.4-character-key-shortcuts.md"
+    },
+    "2.2.1": {
+      "title": "Timing Adjustable",
+      "level": "A",
+      "slug": "timing-adjustable",
+      "file": "sc/2.2.1-timing-adjustable.md"
+    },
+    "2.2.2": {
+      "title": "Pause, Stop, Hide",
+      "level": "A",
+      "slug": "pause-stop-hide",
+      "file": "sc/2.2.2-pause-stop-hide.md"
+    },
+    "2.2.3": {
+      "title": "No Timing",
+      "level": "AAA",
+      "slug": "no-timing",
+      "file": "sc/2.2.3-no-timing.md"
+    },
+    "2.2.4": {
+      "title": "Interruptions",
+      "level": "AAA",
+      "slug": "interruptions",
+      "file": "sc/2.2.4-interruptions.md"
+    },
+    "2.2.5": {
+      "title": "Re-authenticating",
+      "level": "AAA",
+      "slug": "re-authenticating",
+      "file": "sc/2.2.5-re-authenticating.md"
+    },
+    "2.2.6": {
+      "title": "Timeouts",
+      "level": "AAA",
+      "slug": "timeouts",
+      "file": "sc/2.2.6-timeouts.md"
+    },
+    "2.3.1": {
+      "title": "Three Flashes or Below Threshold",
+      "level": "A",
+      "slug": "three-flashes-or-below-threshold",
+      "file": "sc/2.3.1-three-flashes-or-below-threshold.md"
+    },
+    "2.3.2": {
+      "title": "Three Flashes",
+      "level": "AAA",
+      "slug": "three-flashes",
+      "file": "sc/2.3.2-three-flashes.md"
+    },
+    "2.3.3": {
+      "title": "Animation from Interactions",
+      "level": "AAA",
+      "slug": "animation-from-interactions",
+      "file": "sc/2.3.3-animation-from-interactions.md"
+    },
+    "2.4.1": {
+      "title": "Bypass Blocks",
+      "level": "A",
+      "slug": "bypass-blocks",
+      "file": "sc/2.4.1-bypass-blocks.md"
+    },
+    "2.4.2": {
+      "title": "Page Titled",
+      "level": "A",
+      "slug": "page-titled",
+      "file": "sc/2.4.2-page-titled.md"
+    },
+    "2.4.3": {
+      "title": "Focus Order",
+      "level": "A",
+      "slug": "focus-order",
+      "file": "sc/2.4.3-focus-order.md"
+    },
+    "2.4.4": {
+      "title": "Link Purpose (In Context)",
+      "level": "A",
+      "slug": "link-purpose-in-context",
+      "file": "sc/2.4.4-link-purpose-in-context.md"
+    },
+    "2.4.5": {
+      "title": "Multiple Ways",
+      "level": "AA",
+      "slug": "multiple-ways",
+      "file": "sc/2.4.5-multiple-ways.md"
+    },
+    "2.4.6": {
+      "title": "Headings and Labels",
+      "level": "AA",
+      "slug": "headings-and-labels",
+      "file": "sc/2.4.6-headings-and-labels.md"
+    },
+    "2.4.7": {
+      "title": "Focus Visible",
+      "level": "AA",
+      "slug": "focus-visible",
+      "file": "sc/2.4.7-focus-visible.md"
+    },
+    "2.4.8": {
+      "title": "Location",
+      "level": "AAA",
+      "slug": "location",
+      "file": "sc/2.4.8-location.md"
+    },
+    "2.4.9": {
+      "title": "Link Purpose (Link Only)",
+      "level": "AAA",
+      "slug": "link-purpose-link-only",
+      "file": "sc/2.4.9-link-purpose-link-only.md"
+    },
+    "2.4.10": {
+      "title": "Section Headings",
+      "level": "AAA",
+      "slug": "section-headings",
+      "file": "sc/2.4.10-section-headings.md"
+    },
+    "2.4.11": {
+      "title": "Focus Not Obscured (Minimum)",
+      "level": "AA",
+      "slug": "focus-not-obscured-minimum",
+      "file": "sc/2.4.11-focus-not-obscured-minimum.md"
+    },
+    "2.4.12": {
+      "title": "Focus Not Obscured (Enhanced)",
+      "level": "AAA",
+      "slug": "focus-not-obscured-enhanced",
+      "file": "sc/2.4.12-focus-not-obscured-enhanced.md"
+    },
+    "2.4.13": {
+      "title": "Focus Appearance",
+      "level": "AAA",
+      "slug": "focus-appearance",
+      "file": "sc/2.4.13-focus-appearance.md"
+    },
+    "2.5.1": {
+      "title": "Pointer Gestures",
+      "level": "A",
+      "slug": "pointer-gestures",
+      "file": "sc/2.5.1-pointer-gestures.md"
+    },
+    "2.5.2": {
+      "title": "Pointer Cancellation",
+      "level": "A",
+      "slug": "pointer-cancellation",
+      "file": "sc/2.5.2-pointer-cancellation.md"
+    },
+    "2.5.3": {
+      "title": "Label in Name",
+      "level": "A",
+      "slug": "label-in-name",
+      "file": "sc/2.5.3-label-in-name.md"
+    },
+    "2.5.4": {
+      "title": "Motion Actuation",
+      "level": "A",
+      "slug": "motion-actuation",
+      "file": "sc/2.5.4-motion-actuation.md"
+    },
+    "2.5.5": {
+      "title": "Target Size (Enhanced)",
+      "level": "AAA",
+      "slug": "target-size-enhanced",
+      "file": "sc/2.5.5-target-size-enhanced.md"
+    },
+    "2.5.6": {
+      "title": "Concurrent Input Mechanisms",
+      "level": "AAA",
+      "slug": "concurrent-input-mechanisms",
+      "file": "sc/2.5.6-concurrent-input-mechanisms.md"
+    },
+    "2.5.7": {
+      "title": "Dragging Movements",
+      "level": "AA",
+      "slug": "dragging-movements",
+      "file": "sc/2.5.7-dragging-movements.md"
+    },
+    "2.5.8": {
+      "title": "Target Size (Minimum)",
+      "level": "AA",
+      "slug": "target-size-minimum",
+      "file": "sc/2.5.8-target-size-minimum.md"
+    },
+    "3.1.1": {
+      "title": "Language of Page",
+      "level": "A",
+      "slug": "language-of-page",
+      "file": "sc/3.1.1-language-of-page.md"
+    },
+    "3.1.2": {
+      "title": "Language of Parts",
+      "level": "AA",
+      "slug": "language-of-parts",
+      "file": "sc/3.1.2-language-of-parts.md"
+    },
+    "3.1.3": {
+      "title": "Unusual Words",
+      "level": "AAA",
+      "slug": "unusual-words",
+      "file": "sc/3.1.3-unusual-words.md"
+    },
+    "3.1.4": {
+      "title": "Abbreviations",
+      "level": "AAA",
+      "slug": "abbreviations",
+      "file": "sc/3.1.4-abbreviations.md"
+    },
+    "3.1.5": {
+      "title": "Reading Level",
+      "level": "AAA",
+      "slug": "reading-level",
+      "file": "sc/3.1.5-reading-level.md"
+    },
+    "3.1.6": {
+      "title": "Pronunciation",
+      "level": "AAA",
+      "slug": "pronunciation",
+      "file": "sc/3.1.6-pronunciation.md"
+    },
+    "3.2.1": {
+      "title": "On Focus",
+      "level": "A",
+      "slug": "on-focus",
+      "file": "sc/3.2.1-on-focus.md"
+    },
+    "3.2.2": {
+      "title": "On Input",
+      "level": "A",
+      "slug": "on-input",
+      "file": "sc/3.2.2-on-input.md"
+    },
+    "3.2.3": {
+      "title": "Consistent Navigation",
+      "level": "AA",
+      "slug": "consistent-navigation",
+      "file": "sc/3.2.3-consistent-navigation.md"
+    },
+    "3.2.4": {
+      "title": "Consistent Identification",
+      "level": "AA",
+      "slug": "consistent-identification",
+      "file": "sc/3.2.4-consistent-identification.md"
+    },
+    "3.2.5": {
+      "title": "Change on Request",
+      "level": "AAA",
+      "slug": "change-on-request",
+      "file": "sc/3.2.5-change-on-request.md"
+    },
+    "3.2.6": {
+      "title": "Consistent Help",
+      "level": "A",
+      "slug": "consistent-help",
+      "file": "sc/3.2.6-consistent-help.md"
+    },
+    "3.3.1": {
+      "title": "Error Identification",
+      "level": "A",
+      "slug": "error-identification",
+      "file": "sc/3.3.1-error-identification.md"
+    },
+    "3.3.2": {
+      "title": "Labels or Instructions",
+      "level": "A",
+      "slug": "labels-or-instructions",
+      "file": "sc/3.3.2-labels-or-instructions.md"
+    },
+    "3.3.3": {
+      "title": "Error Suggestion",
+      "level": "AA",
+      "slug": "error-suggestion",
+      "file": "sc/3.3.3-error-suggestion.md"
+    },
+    "3.3.4": {
+      "title": "Error Prevention (Legal, Financial, Data)",
+      "level": "AA",
+      "slug": "error-prevention-legal-financial-data",
+      "file": "sc/3.3.4-error-prevention-legal-financial-data.md"
+    },
+    "3.3.5": {
+      "title": "Help",
+      "level": "AAA",
+      "slug": "help",
+      "file": "sc/3.3.5-help.md"
+    },
+    "3.3.6": {
+      "title": "Error Prevention (All)",
+      "level": "AAA",
+      "slug": "error-prevention-all",
+      "file": "sc/3.3.6-error-prevention-all.md"
+    },
+    "3.3.7": {
+      "title": "Redundant Entry",
+      "level": "A",
+      "slug": "redundant-entry",
+      "file": "sc/3.3.7-redundant-entry.md"
+    },
+    "3.3.8": {
+      "title": "Accessible Authentication (Minimum)",
+      "level": "AA",
+      "slug": "accessible-authentication-minimum",
+      "file": "sc/3.3.8-accessible-authentication-minimum.md"
+    },
+    "3.3.9": {
+      "title": "Accessible Authentication (Enhanced)",
+      "level": "AAA",
+      "slug": "accessible-authentication-enhanced",
+      "file": "sc/3.3.9-accessible-authentication-enhanced.md"
+    },
+    "4.1.1": {
+      "title": "Parsing (Obsolete and removed)",
+      "level": "",
+      "slug": "parsing",
+      "file": "sc/4.1.1-parsing.md"
+    },
+    "4.1.2": {
+      "title": "Name, Role, Value",
+      "level": "A",
+      "slug": "name-role-value",
+      "file": "sc/4.1.2-name-role-value.md"
+    },
+    "4.1.3": {
+      "title": "Status Messages",
+      "level": "AA",
+      "slug": "status-messages",
+      "file": "sc/4.1.3-status-messages.md"
+    }
+  },
+  "tags": {
+    "wcag111": "1.1.1",
+    "wcag121": "1.2.1",
+    "wcag122": "1.2.2",
+    "wcag123": "1.2.3",
+    "wcag124": "1.2.4",
+    "wcag125": "1.2.5",
+    "wcag126": "1.2.6",
+    "wcag127": "1.2.7",
+    "wcag128": "1.2.8",
+    "wcag129": "1.2.9",
+    "wcag131": "1.3.1",
+    "wcag132": "1.3.2",
+    "wcag133": "1.3.3",
+    "wcag134": "1.3.4",
+    "wcag135": "1.3.5",
+    "wcag136": "1.3.6",
+    "wcag141": "1.4.1",
+    "wcag142": "1.4.2",
+    "wcag143": "1.4.3",
+    "wcag144": "1.4.4",
+    "wcag145": "1.4.5",
+    "wcag146": "1.4.6",
+    "wcag147": "1.4.7",
+    "wcag148": "1.4.8",
+    "wcag149": "1.4.9",
+    "wcag1410": "1.4.10",
+    "wcag1411": "1.4.11",
+    "wcag1412": "1.4.12",
+    "wcag1413": "1.4.13",
+    "wcag211": "2.1.1",
+    "wcag212": "2.1.2",
+    "wcag213": "2.1.3",
+    "wcag214": "2.1.4",
+    "wcag221": "2.2.1",
+    "wcag222": "2.2.2",
+    "wcag223": "2.2.3",
+    "wcag224": "2.2.4",
+    "wcag225": "2.2.5",
+    "wcag226": "2.2.6",
+    "wcag231": "2.3.1",
+    "wcag232": "2.3.2",
+    "wcag233": "2.3.3",
+    "wcag241": "2.4.1",
+    "wcag242": "2.4.2",
+    "wcag243": "2.4.3",
+    "wcag244": "2.4.4",
+    "wcag245": "2.4.5",
+    "wcag246": "2.4.6",
+    "wcag247": "2.4.7",
+    "wcag248": "2.4.8",
+    "wcag249": "2.4.9",
+    "wcag2410": "2.4.10",
+    "wcag2411": "2.4.11",
+    "wcag2412": "2.4.12",
+    "wcag2413": "2.4.13",
+    "wcag251": "2.5.1",
+    "wcag252": "2.5.2",
+    "wcag253": "2.5.3",
+    "wcag254": "2.5.4",
+    "wcag255": "2.5.5",
+    "wcag256": "2.5.6",
+    "wcag257": "2.5.7",
+    "wcag258": "2.5.8",
+    "wcag311": "3.1.1",
+    "wcag312": "3.1.2",
+    "wcag313": "3.1.3",
+    "wcag314": "3.1.4",
+    "wcag315": "3.1.5",
+    "wcag316": "3.1.6",
+    "wcag321": "3.2.1",
+    "wcag322": "3.2.2",
+    "wcag323": "3.2.3",
+    "wcag324": "3.2.4",
+    "wcag325": "3.2.5",
+    "wcag326": "3.2.6",
+    "wcag331": "3.3.1",
+    "wcag332": "3.3.2",
+    "wcag333": "3.3.3",
+    "wcag334": "3.3.4",
+    "wcag335": "3.3.5",
+    "wcag336": "3.3.6",
+    "wcag337": "3.3.7",
+    "wcag338": "3.3.8",
+    "wcag339": "3.3.9",
+    "wcag411": "4.1.1",
+    "wcag412": "4.1.2",
+    "wcag413": "4.1.3"
+  }
+}

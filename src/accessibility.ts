@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { createServer, type Server } from "node:http";
+import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
 import type {
   CheckResult,
@@ -92,6 +93,12 @@ const TARGETED_EVIDENCE =
 const COMPACT_OUTPUT =
   "Keep outputs compact and deduplicated. Reference finding ids, axe ids, and short element labels; keep evidence snippets brief and do not paste raw HTML, full axe nodes, or long repeated file excerpts.";
 
+// The full WCAG 2.2 spec is far too large to read directly. reference/wcag/ is a
+// generated, navigable copy (built by `npm run build:wcag`); agents consult the
+// tree index and read individual criteria on demand instead of loading the spec.
+const WCAG_REFERENCE =
+  "WCAG 2.2 reference: reference/wcag/index.md is the principle/guideline/success-criterion tree; reference/wcag/sc/<file>.md holds one criterion's normative text; reference/wcag/glossary.md defines terms. Read individual criteria only when you need them; never load the whole set. Compact axe violations carry a `wcag` array naming the success criteria each violation maps to, each with a `ref` path into reference/wcag/sc/.";
+
 function fileList(paths: string[]) {
   return paths.map((path) => `- ${path}`).join("\n");
 }
@@ -124,6 +131,8 @@ ${fileList([
 ])}
 
 ${TARGETED_EVIDENCE} Prefer facts.json and compact axe evidence before targeted original.html inspection.
+
+${WCAG_REFERENCE}
 
 Output: ${join(runDir, "brief.md")}
 
@@ -175,6 +184,7 @@ ${fileList([
 ])}`
 }
 ${TARGETED_EVIDENCE}
+${WCAG_REFERENCE}
 Outputs:
 - ${join(runDir, "transformed.html")}
 - ${join(iterDir, "solver-result.json")}
@@ -230,6 +240,7 @@ ${fileList([
   join(iterDir, "solver-result.json"),
 ])}
 ${TARGETED_EVIDENCE}
+${WCAG_REFERENCE}
 Output: ${join(iterDir, "votes", `${reviewer.id}.json`)}
 
 Compare transformed.html against the original evidence, brief, solver result, and automated checks. Vote on accessibility improvement, task success, content retention, and recognizable brand vibe. Do not penalize layout changes by themselves.
@@ -477,6 +488,56 @@ async function check(
   return result;
 }
 
+// WCAG reference lookup. axe tags every WCAG rule as `wcag` + the success
+// criterion number with dots removed (1.4.3 -> wcag143), so mapping those tags
+// to the generated reference points each compact violation straight at the
+// criterion the fixer should read. Built by `npm run build:wcag`.
+type WcagEntry = { title: string; level: string; slug: string; file: string };
+type WcagMap = {
+  criteria: Record<string, WcagEntry>;
+  tags: Record<string, string>;
+};
+
+let wcagMapCache: WcagMap | null | undefined;
+
+function wcagMap(): WcagMap | null {
+  if (wcagMapCache !== undefined) return wcagMapCache;
+  try {
+    const path = fileURLToPath(
+      new URL("../reference/wcag/wcag-map.json", import.meta.url),
+    );
+    wcagMapCache = JSON.parse(readFileSync(path, "utf8")) as WcagMap;
+  } catch {
+    // The reference is optional; without it, violations simply carry no SC refs.
+    wcagMapCache = null;
+  }
+  return wcagMapCache;
+}
+
+// Resolves an axe violation's tags to the WCAG success criteria they map to,
+// each with a pointer into reference/wcag/sc/ for the normative text.
+function wcagForTags(tags: unknown) {
+  const map = wcagMap();
+  const tagList = stringArray(tags);
+  if (!map || !tagList) return undefined;
+  const refs: { sc: string; title: string; level: string; ref: string }[] = [];
+  const seen = new Set<string>();
+  for (const tag of tagList) {
+    const sc = map.tags[tag];
+    if (!sc || seen.has(sc)) continue;
+    seen.add(sc);
+    const entry = map.criteria[sc];
+    if (!entry) continue;
+    refs.push({
+      sc,
+      title: entry.title,
+      level: entry.level,
+      ref: `reference/wcag/${entry.file}`,
+    });
+  }
+  return refs.length ? refs : undefined;
+}
+
 // Agent prompts read compact axe artifacts by default. Raw axe output is kept in
 // sidecar files, so the compact form keeps rule metadata, a small node sample,
 // and extra locators without flooding the context window.
@@ -507,6 +568,7 @@ function compactAxeViolations(violations: AxeViolationInput[]) {
       helpUrl: violation.helpUrl,
       description: violation.description,
       tags: stringArray(violation.tags),
+      wcag: wcagForTags(violation.tags),
       nodeCount: nodes.length,
       nodes: sampledNodes.map(compactAxeNode),
       additionalTargets: additionalTargets.length ? additionalTargets : undefined,
