@@ -82,6 +82,8 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
   assert.doesNotMatch(result.preview["/report.html"].body, /<pre>/);
   assert.equal(result.preview["/report.html?cache=1"].status, 200);
   assert.equal(result.preview["/report.md"].contentType, "text/markdown; charset=utf-8");
+  assert.equal(result.preview["/sample.webp"].contentType, "image/webp");
+  assert.equal(result.preview["/sample.woff2"].contentType, "font/woff2");
   assert.equal(result.preview["/brief.md"].status, 200);
   assert.equal(JSON.parse(result.preview["/checks.json"].body).iteration, 1);
   assert.equal(JSON.parse(result.preview["/iterations/001/checks.json"].body).iteration, 1);

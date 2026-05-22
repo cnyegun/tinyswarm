@@ -1,12 +1,13 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import { extname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { createServer } from "node:http";
+import { join, resolve } from "node:path";
 import {
   type RunState,
   emit,
   latestIteration,
   log,
 } from "./core.js";
+import { listen, sendStaticFile } from "./static-server.js";
 
 /**
  * Starts a local HTTP server that serves run artifacts from `runDir`.
@@ -39,17 +40,10 @@ export async function serve(run: RunState, artifact: string, preferredPort = 517
     };
     const routed = routes[path];
     const file = routed ? join(runDir, routed) : resolve(root, `.${path}`);
-    // Reject requests that escape the run directory or point to non-files.
-    if (
-      !(file === root || file.startsWith(`${root}/`)) ||
-      !existsSync(file) ||
-      !statSync(file).isFile()
-    ) {
+    if (!sendStaticFile(root, file, res)) {
       res.writeHead(404).end("Not found");
       return;
     }
-    res.setHeader("Content-Type", contentType(file));
-    res.end(readFileSync(file));
   });
   const port = await listen(server, preferredPort).catch(
     (e: NodeJS.ErrnoException) =>
@@ -58,33 +52,4 @@ export async function serve(run: RunState, artifact: string, preferredPort = 517
   log(run, "serve", "listening", { port });
   emit(run, { type: "serve", port, localUrl: `http://localhost:${port}` });
   return { server, port };
-}
-
-function listen(server: Server, port: number) {
-  return new Promise<number>((resolveListen, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolveListen((server.address() as { port: number }).port);
-    });
-  });
-}
-
-function contentType(file: string) {
-  return (
-    (
-      {
-        ".html": "text/html; charset=utf-8",
-        ".md": "text/markdown; charset=utf-8",
-        ".json": "application/json; charset=utf-8",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".svg": "image/svg+xml",
-        ".css": "text/css; charset=utf-8",
-        ".js": "text/javascript; charset=utf-8",
-      } as Record<string, string>
-    )[extname(file).toLowerCase()] || "application/octet-stream"
-  );
 }

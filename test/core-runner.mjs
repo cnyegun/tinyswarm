@@ -357,6 +357,8 @@ function createProfile() {
         JSON.stringify({ input, url: "https://example.test/source" }, null, 2),
       );
       writeTouched(join(ctx.runDir, "axe.json"), JSON.stringify({ violations: [] }));
+      writeTouched(join(ctx.runDir, "sample.webp"), "webp");
+      writeTouched(join(ctx.runDir, "sample.woff2"), "woff2");
       if (scenario.largeArtifacts) {
         // These full sidecars are intentionally huge. The core guard test fails
         // if runSwarm ever inlines their contents into an opencode prompt.
@@ -706,6 +708,8 @@ async function fetchPreview(localUrl) {
     "/report.html",
     "/report.html?cache=1",
     "/report.md",
+    "/sample.webp",
+    "/sample.woff2",
     "/brief.md",
     "/checks.json",
     "/iterations/001/checks.json",

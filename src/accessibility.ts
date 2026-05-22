@@ -3,17 +3,17 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
-import { extname, join, resolve } from "node:path";
-import { createServer, type Server } from "node:http";
+import { join, resolve } from "node:path";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
 import type {
   CheckResult,
   SwarmProfile,
 } from "./core.js";
+import { listen, sendStaticFile } from "./static-server.js";
 
 type Facts = {
   title: string;
@@ -812,57 +812,11 @@ async function serve(runDir: string, preferredPort: number) {
       path === "/"
         ? join(runDir, "transformed.html")
         : resolve(root, `.${path}`);
-    // The resolved-path check prevents `../` and encoded traversal from escaping
-    // the run directory while still allowing nested local assets to be served.
-    if (
-      !(file === root || file.startsWith(`${root}/`)) ||
-      !existsSync(file) ||
-      !statSync(file).isFile()
-    ) {
+    if (!sendStaticFile(root, file, res)) {
       res.writeHead(404).end("Not found");
       return;
     }
-    res.setHeader("Content-Type", contentType(file));
-    res.end(readFileSync(file));
   });
   const port = await listen(server, preferredPort);
   return { server, port };
-}
-
-function contentType(file: string) {
-  // Playwright/axe render pages through a real browser, so serving modern image
-  // and font MIME types matters for visual/layout-dependent checks.
-  return (
-    (
-      {
-        ".avif": "image/avif",
-        ".css": "text/css; charset=utf-8",
-        ".eot": "application/vnd.ms-fontobject",
-        ".gif": "image/gif",
-        ".html": "text/html; charset=utf-8",
-        ".ico": "image/x-icon",
-        ".jpeg": "image/jpeg",
-        ".jpg": "image/jpeg",
-        ".js": "text/javascript; charset=utf-8",
-        ".json": "application/json; charset=utf-8",
-        ".otf": "font/otf",
-        ".png": "image/png",
-        ".svg": "image/svg+xml",
-        ".ttf": "font/ttf",
-        ".webp": "image/webp",
-        ".woff": "font/woff",
-        ".woff2": "font/woff2",
-      } as Record<string, string>
-    )[extname(file).toLowerCase()] || "application/octet-stream"
-  );
-}
-
-function listen(server: Server, port: number) {
-  return new Promise<number>((resolveListen, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolveListen((server.address() as { port: number }).port);
-    });
-  });
 }
