@@ -123,7 +123,9 @@ try {
   if (!original.includes(`${sourceOrigin}/assets/logo.svg`)) throw new Error("original.html did not absolutize image URL");
   if (!checks.passed) throw new Error(`latest checks did not pass: ${JSON.stringify(checks.failures)}`);
   if (decision.outcome !== "accept") throw new Error(`expected accept decision, got ${decision.outcome}`);
-  if (!report.includes("Swarm Report")) throw new Error("report.html was not served");
+  if (!report.includes("Swarm report")) throw new Error("report.html was not served");
+  if (!report.includes('class="utility-bar"')) throw new Error("report.html did not use the design-system utility bar");
+  if (report.includes("<pre>")) throw new Error("report.html still uses the old markdown pre wrapper");
   if (!brief.includes("Mock accessibility brief")) throw new Error("brief.md was not served");
   if (sessionCount !== 4) throw new Error(`expected 4 reused sessions, got ${sessionCount}`);
   if (!prompts.some(p => p.text.includes("Output:") && p.text.includes("brief.md"))) throw new Error("brief prompt missing");

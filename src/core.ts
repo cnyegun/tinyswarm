@@ -790,14 +790,15 @@ function writeFinalReport(run: RunState, decision?: Decision) {
     ? readJsonObject(join(iterDir, "solver-result.json"))
     : undefined;
   const votes = iterDir ? readVoteSummaries(run, iterDir) : [];
-  const markdown = reportMarkdown(run, {
+  const report = {
     latest,
     decision,
     checks,
     solver,
     votes,
-  });
-  const html = reportHtml(run, markdown);
+  };
+  const markdown = reportMarkdown(run, report);
+  const html = reportHtml(run, report);
 
   writeFileSync(outputs[0], markdown);
   writeFileSync(outputs[1], html);
@@ -836,6 +837,8 @@ type ReportInputs = {
   votes: VoteSummary[];
 };
 
+type ReportTone = "success" | "warning" | "error" | "info";
+
 function readVoteSummaries(run: RunState, iterDir: string): VoteSummary[] {
   return run.profile.reviewers.flatMap((reviewer) => {
     const data = readJsonObject(join(iterDir, "votes", `${reviewer.id}.json`));
@@ -864,7 +867,7 @@ function readJsonObject(file: string): Record<string, unknown> | undefined {
   }
 }
 
-function reportMarkdown(run: RunState, report: ReportInputs) {
+function reportView(run: RunState, report: ReportInputs) {
   const failures = stringArray(report.checks?.failures);
   const fixes = stringArray(report.solver?.accessibilityFixes);
   const preservation = stringArray(report.solver?.preservationNotes);
@@ -882,90 +885,453 @@ function reportMarkdown(run: RunState, report: ReportInputs) {
   if (report.decision?.outcome === "stop_with_risks" && report.decision.reason)
     riskSummary.unshift(report.decision.reason);
 
+  const checksKnown = !!report.checks;
+  const checksPassed = report.checks?.passed === true;
+  const axeViolations = Array.isArray(report.checks?.axeViolations)
+    ? report.checks.axeViolations.length
+    : undefined;
+  const accepts = report.decision?.accepts ?? 0;
+  const blocks = report.decision?.blocks ?? 0;
+  const checkTone: ReportTone = !checksKnown
+    ? "info"
+    : checksPassed
+      ? "success"
+      : "error";
+  const outcomeTone: ReportTone = report.decision?.outcome === "accept"
+    ? "success"
+    : report.decision?.outcome === "continue" ||
+        report.decision?.outcome === "stop_with_risks"
+      ? "warning"
+      : "info";
+
+  return {
+    profile: compactText(run.profile.id),
+    input: compactText(run.input),
+    latest: report.latest || "none",
+    decision: report.decision?.outcome || "unknown",
+    decisionReason: compactText(
+      report.decision?.reason || "No decision reason recorded.",
+    ),
+    checks: checkStatus(report.checks),
+    reviewerTally: `${accepts} accept, ${blocks} block`,
+    changeSummary,
+    preservationSummary: preservation.length
+      ? preservation
+      : [
+          "Review the final artifact against the source page for content, task flow, and brand/vibe preservation.",
+        ],
+    removed,
+    votes: report.votes,
+    failures,
+    riskSummary,
+    artifacts: artifactLinks(run, report.latest),
+    outcomeTone,
+    checkTone,
+    metrics: [
+      {
+        label: "Final iteration",
+        value: report.latest || "none",
+        detail: "Run loop result",
+        tone: "info" as ReportTone,
+      },
+      {
+        label: "Automated checks",
+        value: checksKnown ? (checksPassed ? "Passed" : "Failed") : "Not available",
+        detail: checkStatus(report.checks),
+        tone: checkTone,
+      },
+      {
+        label: "Axe violations",
+        value: axeViolations === undefined ? "Not recorded" : String(axeViolations),
+        detail: "Browser-computed axe result",
+        tone: axeViolations === undefined
+          ? "info" as ReportTone
+          : axeViolations === 0
+            ? "success" as ReportTone
+            : checkTone,
+      },
+      {
+        label: "Reviewer tally",
+        value: `${accepts} accept / ${blocks} block`,
+        detail: report.votes.length
+          ? `${report.votes.length} reviewer ${plural(report.votes.length, "vote")}`
+          : "No reviewer votes recorded",
+        tone: blocks > 0 ? "warning" as ReportTone : "info" as ReportTone,
+      },
+    ],
+  };
+}
+
+function reportMarkdown(run: RunState, report: ReportInputs) {
+  const view = reportView(run, report);
+
   const lines = [
     "# Swarm Report",
     "",
     "## Outcome",
-    `- Profile: ${compactText(run.profile.id)}`,
-    `- Input: ${compactText(run.input)}`,
-    `- Final iteration: ${report.latest || "none"}`,
-    `- Decision: ${report.decision?.outcome || "unknown"}`,
-    `- Automated checks: ${checkStatus(report.checks)}`,
-    `- Reviewer tally: ${report.decision?.accepts ?? 0} accept, ${report.decision?.blocks ?? 0} block`,
-    `- Decision reason: ${compactText(report.decision?.reason || "No decision reason recorded.")}`,
+    `- Profile: ${view.profile}`,
+    `- Input: ${view.input}`,
+    `- Final iteration: ${view.latest}`,
+    `- Decision: ${view.decision}`,
+    `- Automated checks: ${view.checks}`,
+    `- Reviewer tally: ${view.reviewerTally}`,
+    `- Decision reason: ${view.decisionReason}`,
     "",
     "## Implementation Summary",
-    ...bulletLines(changeSummary),
+    ...bulletLines(view.changeSummary),
     "",
     "## Preservation And Scope",
-    ...bulletLines(
-      preservation.length
-        ? preservation
-        : [
-            "Review the final artifact against the source page for content, task flow, and brand/vibe preservation.",
-          ],
-    ),
-    ...(removed.length
-      ? ["", "## Removed Or Reworked Content", ...bulletLines(removed)]
+    ...bulletLines(view.preservationSummary),
+    ...(view.removed.length
+      ? ["", "## Removed Or Reworked Content", ...bulletLines(view.removed)]
       : []),
     "",
     "## Reviewer Votes",
-    ...(report.votes.length
-      ? report.votes.map(
+    ...(view.votes.length
+      ? view.votes.map(
           (vote) =>
             `- ${compactText(vote.name)}: ${compactText(vote.vote)}${vote.score === undefined ? "" : ` (${vote.score})`} - ${compactText(vote.reason)}`,
         )
       : ["- No reviewer votes were recorded for the final iteration."]),
-    ...(failures.length
-      ? ["", "## Check Failures", ...bulletLines(failures)]
+    ...(view.failures.length
+      ? ["", "## Check Failures", ...bulletLines(view.failures)]
       : []),
     "",
     "## Residual Risks And Limits",
     ...bulletLines([
-      ...riskSummary,
+      ...view.riskSummary,
       "Passing automated checks is useful evidence, not a full WCAG conformance claim.",
       "Manual keyboard, screen reader, zoom/reflow, responsive, and content-owner review should still verify production behavior.",
     ]),
     "",
     "## Artifacts",
-    ...artifactLinks(run, report.latest).map(
+    ...view.artifacts.map(
       (artifact) => `- [${artifact.label}](${artifact.href})`,
     ),
   ];
   return `${lines.join("\n")}\n`;
 }
 
-function reportHtml(run: RunState, markdown: string) {
+function reportHtml(run: RunState, report: ReportInputs) {
+  const view = reportView(run, report);
+  const navItems = [
+    { href: "#outcome", label: "Outcome" },
+    { href: "#run-summary", label: "Run summary" },
+    { href: "#implementation-summary", label: "Implementation summary" },
+    { href: "#preservation", label: "Preservation and scope" },
+    ...(view.removed.length
+      ? [{ href: "#removed-content", label: "Removed or reworked content" }]
+      : []),
+    { href: "#reviewer-votes", label: "Reviewer votes" },
+    ...(view.failures.length
+      ? [{ href: "#check-failures", label: "Check failures" }]
+      : []),
+    { href: "#residual-risks", label: "Residual risks and limits" },
+    { href: "#artifacts", label: "Artifacts" },
+    { href: "#accessibility-statement", label: "Accessibility statement" },
+  ];
+  const removedSection = view.removed.length
+    ? `<section class="content-block" id="removed-content" aria-labelledby="removed-content-title">
+        <h2 id="removed-content-title">Removed or reworked content</h2>
+        ${htmlList(view.removed)}
+      </section>`
+    : "";
+  const failuresSection = view.failures.length
+    ? `<section class="content-block content-block--attention" id="check-failures" aria-labelledby="check-failures-title">
+        <h2 id="check-failures-title">Check failures</h2>
+        ${htmlList(view.failures)}
+      </section>`
+    : "";
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Swarm Report</title>
+  <title>Swarm report</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #f6f7fb; color: #141821; }
-    main { max-width: 78ch; margin: 0 auto; padding: 2rem 1rem 4rem; }
-    h1 { line-height: 1.15; }
-    nav { display: flex; flex-wrap: wrap; gap: .75rem; margin-block: 1rem 1.5rem; }
-    pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #fff; border: 1px solid #d9deea; border-radius: .75rem; }
-    a { color: #0b57d0; }
-    @media (prefers-color-scheme: dark) { body { background: #10131a; color: #eef2ff; } pre { background: #171b25; border-color: #343b4f; } a { color: #8ab4ff; } }
+    :root {
+      --color-primary: #003580;
+      --color-primary-dark: #00265c;
+      --color-primary-darker: #001a40;
+      --color-primary-tint: #e6ebf3;
+      --color-accent: #7b2d8e;
+      --color-text: #1a1a1a;
+      --color-text-muted: #595959;
+      --color-text-inverse: #ffffff;
+      --color-surface: #ffffff;
+      --color-surface-subtle: #f3f3f3;
+      --color-border: #c9c9c9;
+      --color-border-input: #595959;
+      --color-success: #0a7d3c;
+      --color-success-bg: #e7f2eb;
+      --color-warning: #8a6100;
+      --color-warning-bg: #fbf0d4;
+      --color-error: #b3171f;
+      --color-error-bg: #fae7e8;
+      --color-info: #003580;
+      --color-info-bg: #e6ebf3;
+      --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, "Liberation Sans", system-ui, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --text-xs: 0.875rem;
+      --text-sm: 1rem;
+      --text-base: 1.125rem;
+      --text-lg: 1.375rem;
+      --text-xl: 1.75rem;
+      --text-2xl: 2.25rem;
+      --text-3xl: 2.75rem;
+      --leading-tight: 1.25;
+      --leading-normal: 1.6;
+      --weight-regular: 400;
+      --weight-semibold: 600;
+      --weight-bold: 700;
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.5rem;
+      --space-6: 2rem;
+      --space-7: 3rem;
+      --space-8: 4rem;
+      --space-9: 6rem;
+      --layout-max: 1200px;
+      --layout-gutter: var(--space-5);
+      --radius: 0;
+      --border-hairline: 1px solid var(--color-border);
+      --focus-color: #1a1a1a;
+      --focus-width: 3px;
+      --focus-offset: 2px;
+      --duration: 160ms;
+      --easing: ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--color-surface);
+      color: var(--color-text);
+      font-family: var(--font-sans);
+      font-size: var(--text-base);
+      font-weight: var(--weight-regular);
+      line-height: var(--leading-normal);
+    }
+    a { color: var(--color-primary); text-decoration: underline; text-underline-offset: var(--space-1); }
+    a:hover { color: var(--color-primary-dark); }
+    a:focus-visible {
+      outline: var(--focus-width) solid var(--focus-color);
+      outline-offset: var(--focus-offset);
+    }
+    h1, h2, h3, p { margin-block-start: 0; }
+    h1, h2, h3 { color: var(--color-text); line-height: var(--leading-tight); }
+    h1 { font-size: var(--text-2xl); font-weight: var(--weight-bold); letter-spacing: -0.02em; margin-block-end: var(--space-4); }
+    h2 { font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -0.01em; margin-block-end: var(--space-4); }
+    h3 { font-size: var(--text-lg); font-weight: var(--weight-semibold); letter-spacing: -0.01em; margin-block-end: var(--space-3); }
+    p { max-width: 70ch; margin-block-end: var(--space-4); }
+    ul { margin-block: 0; padding-inline-start: var(--space-5); }
+    li + li { margin-block-start: var(--space-2); }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: var(--space-3) var(--space-2); border-bottom: var(--border-hairline); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { border-bottom: var(--focus-offset) solid var(--color-text); font-weight: var(--weight-bold); }
+
+    .layout { width: min(100% - calc(var(--layout-gutter) * 2), var(--layout-max)); margin-inline: auto; }
+    .utility-bar { background: var(--color-primary); color: var(--color-text-inverse); font-size: var(--text-sm); }
+    .utility-bar__inner { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; min-height: var(--space-7); }
+    .utility-bar__link { color: var(--color-text-inverse); }
+    .utility-bar__link:hover { color: var(--color-text-inverse); }
+    .utility-bar__link:focus-visible, .site-footer a:focus-visible { outline-color: var(--color-text-inverse); }
+    .brand-header { border-bottom: var(--border-hairline); background: var(--color-surface); }
+    .brand-header__inner { display: grid; gap: var(--space-5); padding-block: var(--space-7); }
+    .brand-header__eyebrow { color: var(--color-text-muted); font-size: var(--text-sm); font-weight: var(--weight-semibold); margin-block-end: var(--space-2); }
+    .brand-header__lede { color: var(--color-text-muted); font-size: var(--text-base); margin-block-end: 0; }
+    .action-list { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+    .button { display: inline-flex; align-items: center; min-height: var(--space-7); padding: var(--space-3) var(--space-5); border: var(--focus-offset) solid var(--color-primary); border-radius: var(--radius); font-size: var(--text-sm); font-weight: var(--weight-semibold); text-decoration: none; transition: background var(--duration) var(--easing); }
+    .button--primary { background: var(--color-primary); color: var(--color-text-inverse); border-color: var(--color-primary); }
+    .button--primary:hover { background: var(--color-primary-dark); color: var(--color-text-inverse); }
+    .button--secondary { background: var(--color-surface); color: var(--color-primary); }
+    .button--secondary:hover { background: var(--color-primary-tint); }
+    .report-layout { display: grid; gap: var(--space-7); padding-block: var(--space-7) var(--space-8); }
+    .section-nav { border: var(--border-hairline); background: var(--color-surface); }
+    .section-nav__title { padding: var(--space-5); margin: 0; border-bottom: var(--border-hairline); font-size: var(--text-lg); }
+    .section-nav__list { display: grid; }
+    .section-nav__link { display: block; padding: var(--space-4); border-bottom: var(--border-hairline); color: var(--color-text); font-weight: var(--weight-bold); text-decoration: none; }
+    .section-nav__link:hover { background: var(--color-surface-subtle); color: var(--color-primary); text-decoration: underline; }
+    .report-content { display: grid; gap: var(--space-6); min-width: 0; }
+    .status-banner, .content-block { border: var(--border-hairline); border-radius: var(--radius); padding: var(--space-5); background: var(--color-surface); }
+    .status-banner { border-left: var(--space-1) solid var(--color-info); background: var(--color-info-bg); }
+    .status-banner--success { border-left-color: var(--color-success); background: var(--color-success-bg); }
+    .status-banner--warning { border-left-color: var(--color-warning); background: var(--color-warning-bg); }
+    .status-banner--error { border-left-color: var(--color-error); background: var(--color-error-bg); }
+    .status-banner__label { font-size: var(--text-sm); font-weight: var(--weight-bold); margin-block-end: var(--space-2); }
+    .status-banner__meta { display: grid; gap: var(--space-2); margin: 0; }
+    .status-banner__meta div { display: grid; gap: var(--space-1); }
+    .status-banner__meta dt { color: var(--color-text-muted); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+    .status-banner__meta dd { margin: 0; overflow-wrap: anywhere; }
+    .content-block--attention { border-left: var(--space-1) solid var(--color-error); }
+    .metric-grid { display: grid; gap: var(--space-5); margin: 0; }
+    .metric-card { border: var(--border-hairline); padding: var(--space-5); background: var(--color-surface); }
+    .metric-card--success { border-top: var(--space-1) solid var(--color-success); }
+    .metric-card--warning { border-top: var(--space-1) solid var(--color-warning); }
+    .metric-card--error { border-top: var(--space-1) solid var(--color-error); }
+    .metric-card--info { border-top: var(--space-1) solid var(--color-info); }
+    .metric-card dt { color: var(--color-text-muted); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+    .metric-card dd { margin: 0; }
+    .metric-card__value { display: block; margin-block: var(--space-2); font-size: var(--text-xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); overflow-wrap: anywhere; }
+    .metric-card__detail { color: var(--color-text-muted); font-size: var(--text-sm); }
+    .content-list { display: grid; gap: var(--space-2); }
+    .artifact-list { display: grid; gap: var(--space-3); padding-inline-start: 0; list-style: none; }
+    .artifact-list__item { border-bottom: var(--border-hairline); padding-block-end: var(--space-3); }
+    .data-table { font-size: var(--text-sm); }
+    .muted { color: var(--color-text-muted); }
+    .site-footer { background: var(--color-primary-darker); color: var(--color-text-inverse); }
+    .site-footer__inner { display: grid; gap: var(--space-5); padding-block: var(--space-7); }
+    .site-footer a { color: var(--color-text-inverse); }
+    .site-footer p { margin-block-end: 0; }
+
+    @media (min-width: 768px) {
+      h1 { font-size: var(--text-3xl); }
+      .brand-header__inner { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+      .report-layout { grid-template-columns: minmax(calc(var(--space-8) * 4), calc(var(--space-9) * 3)) minmax(0, 1fr); align-items: start; }
+      .section-nav { position: sticky; top: var(--space-5); }
+      .status-banner__meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .site-footer__inner { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+    }
+
+    @media (min-width: 1024px) {
+      .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .button { transition: none; }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>Swarm Report</h1>
-    <nav aria-label="Report links">
-      <a href="${escapeHtml(run.profile.artifact)}">Transformed artifact</a>
-      <a href="report.md">Markdown report</a>
-      <a href="brief.md">Brief</a>
-    </nav>
-    <pre>${escapeHtml(markdown)}</pre>
+  <div class="utility-bar">
+    <div class="layout utility-bar__inner">
+      <a class="utility-bar__link" href="#main">Skip to main content</a>
+      <span>Generated locally from run artifacts</span>
+    </div>
+  </div>
+  <header class="brand-header">
+    <div class="layout brand-header__inner">
+      <div>
+        <p class="brand-header__eyebrow">Accessibility AI Audit</p>
+        <h1>Swarm report</h1>
+        <p class="brand-header__lede">A deterministic summary of the final artifact, checks, reviewer votes, and residual risks.</p>
+      </div>
+      <nav class="action-list" aria-label="Report actions">
+        <a class="button button--primary" href="${escapeHtml(run.profile.artifact)}">Open transformed artifact</a>
+        <a class="button button--secondary" href="report.md">Open markdown report</a>
+        <a class="button button--secondary" href="brief.md">Open brief</a>
+      </nav>
+    </div>
+  </header>
+  <main class="layout report-layout" id="main">
+    <aside class="section-nav" aria-labelledby="section-nav-title">
+      <h2 class="section-nav__title" id="section-nav-title">Report sections</h2>
+      <nav class="section-nav__list" aria-label="Report sections">
+        ${navItems.map((item) => `<a class="section-nav__link" href="${item.href}">${escapeHtml(item.label)}</a>`).join("\n        ")}
+      </nav>
+    </aside>
+    <div class="report-content">
+      <section class="status-banner status-banner--${view.outcomeTone}" id="outcome" aria-labelledby="outcome-title">
+        <p class="status-banner__label">Outcome</p>
+        <h2 id="outcome-title">Decision: ${escapeHtml(humanize(view.decision))}</h2>
+        <p>${escapeHtml(view.decisionReason)}</p>
+        <dl class="status-banner__meta">
+          <div><dt>Profile</dt><dd>${escapeHtml(view.profile)}</dd></div>
+          <div><dt>Input</dt><dd>${escapeHtml(view.input)}</dd></div>
+          <div><dt>Automated checks</dt><dd>${escapeHtml(view.checks)}</dd></div>
+          <div><dt>Reviewer tally</dt><dd>${escapeHtml(view.reviewerTally)}</dd></div>
+        </dl>
+      </section>
+
+      <section class="content-block" id="run-summary" aria-labelledby="run-summary-title">
+        <h2 id="run-summary-title">Run summary</h2>
+        <dl class="metric-grid">
+          ${view.metrics.map((metric) => `<div class="metric-card metric-card--${metric.tone}"><dt>${escapeHtml(metric.label)}</dt><dd><span class="metric-card__value">${escapeHtml(metric.value)}</span><span class="metric-card__detail">${escapeHtml(metric.detail)}</span></dd></div>`).join("\n          ")}
+        </dl>
+      </section>
+
+      <section class="content-block" id="implementation-summary" aria-labelledby="implementation-summary-title">
+        <h2 id="implementation-summary-title">Implementation summary</h2>
+        ${htmlList(view.changeSummary)}
+      </section>
+
+      <section class="content-block" id="preservation" aria-labelledby="preservation-title">
+        <h2 id="preservation-title">Preservation and scope</h2>
+        ${htmlList(view.preservationSummary)}
+      </section>
+
+      ${removedSection}
+
+      <section class="content-block" id="reviewer-votes" aria-labelledby="reviewer-votes-title">
+        <h2 id="reviewer-votes-title">Reviewer votes</h2>
+        ${reviewerVotesHtml(view.votes)}
+      </section>
+
+      ${failuresSection}
+
+      <section class="content-block" id="residual-risks" aria-labelledby="residual-risks-title">
+        <h2 id="residual-risks-title">Residual risks and limits</h2>
+        ${htmlList([
+          ...view.riskSummary,
+          "Passing automated checks is useful evidence, not a full WCAG conformance claim.",
+          "Manual keyboard, screen reader, zoom/reflow, responsive, and content-owner review should still verify production behavior.",
+        ])}
+      </section>
+
+      <section class="content-block" id="artifacts" aria-labelledby="artifacts-title">
+        <h2 id="artifacts-title">Artifacts</h2>
+        <ul class="artifact-list">
+          ${view.artifacts.map((artifact) => `<li class="artifact-list__item"><a href="${escapeHtml(artifact.href)}">${escapeHtml(artifact.label)}</a></li>`).join("\n          ")}
+        </ul>
+      </section>
+
+      <section class="content-block" id="accessibility-statement" aria-labelledby="accessibility-statement-title">
+        <h2 id="accessibility-statement-title">Accessibility statement</h2>
+        <p>This generated report uses semantic landmarks, ordered headings, visible focus styles, high-contrast token pairings, and keyboard-operable links. The report itself is deterministic, but the transformed page still needs manual assistive-technology and content-owner review before any conformance claim.</p>
+      </section>
+    </div>
   </main>
+  <footer class="site-footer">
+    <div class="layout site-footer__inner">
+      <p>Accessibility AI Audit report for ${escapeHtml(view.profile)}.</p>
+      <p><a href="#accessibility-statement">Read the accessibility statement</a></p>
+    </div>
+  </footer>
 </body>
 </html>
 `;
+}
+
+function htmlList(items: string[]) {
+  return `<ul class="content-list">
+          ${items.map((item) => `<li>${escapeHtml(compactText(item))}</li>`).join("\n          ")}
+        </ul>`;
+}
+
+function reviewerVotesHtml(votes: VoteSummary[]) {
+  if (!votes.length)
+    return `<p class="muted">No reviewer votes were recorded for the final iteration.</p>`;
+  return `<table class="data-table">
+          <thead>
+            <tr>
+              <th scope="col">Reviewer</th>
+              <th scope="col">Vote</th>
+              <th scope="col">Score</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${votes.map((vote) => `<tr><th scope="row">${escapeHtml(compactText(vote.name))}</th><td>${escapeHtml(humanize(compactText(vote.vote)))}</td><td>${vote.score === undefined ? "Not scored" : escapeHtml(String(vote.score))}</td><td>${escapeHtml(compactText(vote.reason))}</td></tr>`).join("\n            ")}
+          </tbody>
+        </table>`;
+}
+
+function humanize(value: string) {
+  return value.replaceAll("_", " ");
 }
 
 function checkStatus(checks?: Record<string, unknown>) {

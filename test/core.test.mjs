@@ -75,7 +75,11 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
   assert.equal(result.preview["/artifact.html?download=1"].status, 200);
   assert.match(result.preview["/artifact.html?download=1"].body, /Artifact 1/);
   assert.equal(result.preview["/report.html"].status, 200);
-  assert.match(result.preview["/report.html"].body, /Report/);
+  assert.match(result.preview["/report.html"].body, /Swarm report/);
+  assert.match(result.preview["/report.html"].body, /class="utility-bar"/);
+  assert.match(result.preview["/report.html"].body, /id="accessibility-statement"/);
+  assert.match(result.preview["/report.html"].body, /--color-primary: #003580/);
+  assert.doesNotMatch(result.preview["/report.html"].body, /<pre>/);
   assert.equal(result.preview["/report.html?cache=1"].status, 200);
   assert.equal(result.preview["/report.md"].contentType, "text/markdown; charset=utf-8");
   assert.equal(result.preview["/brief.md"].status, 200);
