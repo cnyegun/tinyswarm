@@ -216,6 +216,26 @@ test("each progress callback is also mirrored as a {type:progress} event", async
   }
 });
 
+test("per-role model overrides reach the reporter.line callback", async () => {
+  // When SWARM_ORCHESTRATOR_MODEL or SWARM_FIXER_MODEL differs from the
+  // default SWARM_MODEL, runSwarm should announce the override through
+  // reporter.line — the same channel as every other startup line ("Run:",
+  // "Log:", "Model:") — so capturing consumers and JSON-events mode see
+  // (or cleanly drop) them consistently. Routing these through
+  // console.log instead would inject non-JSON noise into the
+  // --json-events stdout stream that web.ts and the Rust TUI parse.
+  const result = await runScenario("orchestrator-fixer-model-env");
+  assert.equal(result.error, undefined);
+  assert.ok(
+    result.capturedLines.some((line) => /^Orchestrator model:/.test(line)),
+    `capturedLines missing orchestrator override: ${JSON.stringify(result.capturedLines)}`,
+  );
+  assert.ok(
+    result.capturedLines.some((line) => /^Fixer model:/.test(line)),
+    `capturedLines missing fixer override: ${JSON.stringify(result.capturedLines)}`,
+  );
+});
+
 test("line callbacks deliver the CLI summary block at run completion", async () => {
   const result = await runScenario("accept-first");
   // Six summary lines are printed at the start and end of the run; they are

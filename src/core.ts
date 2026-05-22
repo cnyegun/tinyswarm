@@ -187,14 +187,16 @@ function prepareRun(
     modelName(orchestratorModel) !== modelName(model) ||
     orchestratorModel.variant !== model.variant
   )
-    console.log(
+    line(
+      run,
       `Orchestrator model: ${modelName(orchestratorModel)} (variant=${orchestratorModel.variant})`,
     );
   if (
     modelName(fixerModel) !== modelName(model) ||
     fixerModel.variant !== model.variant
   )
-    console.log(
+    line(
+      run,
       `Fixer model: ${modelName(fixerModel)} (variant=${fixerModel.variant})`,
     );
 
