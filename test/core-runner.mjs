@@ -46,6 +46,8 @@ const scenarios = {
     maxIterations: "1",
     checks: [true],
     decisions: ["accept"],
+    // Writes huge artifacts containing sentinel strings. The paired core test
+    // asserts prompts mention only their paths, never their contents.
     largeArtifacts: true,
   },
   "no-reviewers": {
@@ -352,6 +354,8 @@ function createProfile() {
       );
       writeTouched(join(ctx.runDir, "axe.json"), JSON.stringify({ violations: [] }));
       if (scenario.largeArtifacts) {
+        // These full sidecars are intentionally huge. The core guard test fails
+        // if runSwarm ever inlines their contents into an opencode prompt.
         writeTouched(
           join(ctx.runDir, "axe-full.json"),
           largeArtifact(rawArtifactSentinels.axeFull),
@@ -424,6 +428,8 @@ function createProfile() {
 }
 
 function promptText(phase, details, outputs) {
+  // For the large-artifacts scenario, prompts list artifact paths just like a
+  // real profile would. The sentinel contents stay on disk, not in prompt text.
   const availableFiles = scenario.largeArtifacts ? largeArtifactPaths(details) : [];
   const lines = [
     `PHASE: ${phase}`,
@@ -441,6 +447,8 @@ function promptText(phase, details, outputs) {
 }
 
 function largeArtifactPaths(details) {
+  // Include both compact and full paths to make sure the prompt-budget guard does
+  // not accidentally ban sidecar references, only raw sidecar contents.
   return [
     join(details.runDir, "original.html"),
     join(details.runDir, "axe.json"),
@@ -451,6 +459,8 @@ function largeArtifactPaths(details) {
 }
 
 function largeArtifact(sentinel) {
+  // The repeated body makes accidental inlining obvious by size; the sentinel
+  // makes the failure message identify which artifact leaked.
   return `${sentinel}\n${"x".repeat(12000)}`;
 }
 

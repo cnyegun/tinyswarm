@@ -15,6 +15,8 @@ const transparentGif =
 const axeTargetLimit = 240;
 
 test("dist accessibility build is fresh", async () => {
+  // These tests import dist/accessibility.js. A stale dist build would make the
+  // tests pass against old code while src/accessibility.ts regresses.
   const distAccessibility = join(repoRoot, "dist", "accessibility.js");
   const srcAccessibility = join(repoRoot, "src", "accessibility.ts");
 
@@ -35,6 +37,9 @@ test("dist accessibility build is fresh", async () => {
 
 test("accessibility scan writes compact axe and full axe sidecar", async () => {
   const runDir = await mkdtemp(join(tmpdir(), "tiny-rewrite-a11y-scan-"));
+  // This fixture intentionally creates too many headings/links/buttons/images
+  // and very long selectors. The assertions below encode the prompt-budget caps
+  // for both facts.json and compact axe evidence.
   const longAttr = "x".repeat(2000);
   const headings = Array.from(
     { length: 70 },
@@ -76,6 +81,8 @@ test("accessibility scan writes compact axe and full axe sidecar", async () => {
   const compactViolation = compact.violations.find((item) => item.id === "image-alt");
   const fullViolation = full.violations.find((item) => item.id === "image-alt");
 
+  // compact axe evidence should contain only actionable rule groups and bounded
+  // node samples. The full sidecar keeps every raw node for targeted inspection.
   assert.equal("passes" in compact, false);
   assert.equal("inapplicable" in compact, false);
   assertCompactViolationShape(compactViolation, 90);
@@ -83,6 +90,7 @@ test("accessibility scan writes compact axe and full axe sidecar", async () => {
   assert.ok(JSON.stringify(compact).length < 30000);
   assert.ok(JSON.stringify(compact).length < JSON.stringify(full).length / 3);
 
+  // facts.json is also prompt input, so source-inventory lists must stay capped.
   assert.equal(facts.headings.length, 60);
   assert.equal(facts.links.length, 100);
   assert.equal(facts.buttons.length, 60);
@@ -96,6 +104,8 @@ test("accessibility check keeps axe violations compact but actionable", async ()
   await writeFile(join(runDir, "facts.json"), JSON.stringify({ url: "" }));
 
   const longAttr = "y".repeat(2000);
+  // Missing-alt images produce many repeated axe nodes. The compact result should
+  // keep first samples plus extra selectors, not every node's HTML/check payload.
   const images = Array.from(
     { length: 90 },
     (_, index) =>
@@ -116,6 +126,8 @@ test("accessibility check keeps axe violations compact but actionable", async ()
   assert.match(violation.nodes[0].failureSummary, /alt attribute/);
   assert.ok(JSON.stringify(result).length < 30000);
 
+  // check() returns compact data, while checks-full.json keeps the raw axe nodes
+  // beside checks.json for targeted debugging.
   const full = JSON.parse(
     await readFile(join(runDir, "iterations", "001", "checks-full.json"), "utf8"),
   );
@@ -139,6 +151,8 @@ test("accessibility check serves modern asset MIME types", async () => {
     </script></head><body><main><h1>Asset MIME</h1></main></body></html>`,
   );
 
+  // The page writes fetched content types into <title>, giving us an assertion on
+  // the private preview server without exporting its serve() helper.
   const result = await accessibilityProfile.check({ rootDir: runDir, runDir }, 1);
 
   assert.equal(result.title, "image/webp|font/woff2");
@@ -153,6 +167,8 @@ test("accessibility prompts keep sidecars targeted and prior iteration exact", (
     { rootDir: runDir, runDir, iterDir, iteration: 2 },
     reviewer,
   );
+  // Findings for iteration 2 run before iteration 2 check(), so the prompt must
+  // point at iteration 1 check evidence rather than a file that does not exist.
   assert.match(findings, /iterations\/001\/checks-full\.json/);
   assert.doesNotMatch(findings, /iterations\/002\/checks-full\.json/);
   assert.doesNotMatch(findings, /iterations\/\*/);
@@ -182,6 +198,8 @@ test("accessibility prompts keep sidecars targeted and prior iteration exact", (
 });
 
 function assertCompactViolationShape(violation, nodeCount) {
+  // This helper mirrors the production caps. If somebody raises/removes a cap,
+  // they should update this assertion intentionally rather than by accident.
   assert.equal(violation.nodeCount, nodeCount);
   assert.ok(violation.nodes.length <= 5);
   assert.equal(violation.omittedNodes, nodeCount - violation.nodes.length);
@@ -202,6 +220,8 @@ function assertCompactViolationShape(violation, nodeCount) {
 }
 
 function assertCompactTarget(target) {
+  // Axe may return nested target arrays for frames/shadow DOM. The compact form
+  // preserves nesting while truncating every selector string independently.
   if (Array.isArray(target)) {
     assert.ok(target.length > 0);
     for (const item of target) assertCompactTarget(item);
