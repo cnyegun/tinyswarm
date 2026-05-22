@@ -73,15 +73,51 @@ const HTML_SRCSET_ATTRIBUTE = /(\ssrcset=)(["'])([^"']*)\2/gi;
 const ROOT_RELATIVE_CSS_URL = /url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi;
 
 const reviewers = [
-  { id: "accessibility", name: "accessibility reviewer" },
-  { id: "preservation", name: "preservation and task clarity reviewer" },
+  { id: "semantic", name: "screen-reader and semantic structure reviewer" },
+  { id: "keyboard", name: "keyboard and motor access reviewer" },
+  { id: "cognitive", name: "cognitive load and clarity reviewer" },
+  { id: "visual", name: "low-vision, contrast, zoom, and mobile reviewer" },
+  { id: "preservation", name: "content preservation reviewer" },
 ];
 
-const roleCriteria: Record<string, string> = {
-  accessibility:
-    "High-impact WCAG coverage only: names/roles/landmarks, heading order, keyboard reachability, visible focus, link/button names, alt text, contrast, zoom/reflow, and mobile overflow.",
-  preservation:
-    "Preservation and task clarity: keep purpose, substantive copy, CTAs, links, important media/logos, key details, partners/sponsors, and recognizable brand vibe. Layout changes are allowed.",
+// Short role rubrics make reviewers act like specialists without adding new
+// workflow steps or forcing the whole WCAG spec into every prompt.
+const reviewerRubrics: Record<string, string> = {
+  semantic: `Mission: screen-reader structure, names, roles, and programmatic meaning.
+WCAG focus: 1.1.1 Non-text Content; 1.3.1 Info and Relationships; 2.4.2 Page Titled; 2.4.4 Link Purpose; 2.4.6 Headings and Labels; 3.1.1 Language of Page; 4.1.2 Name, Role, Value; 4.1.3 Status Messages.
+Audit procedure: check title/lang; inspect landmarks; verify exactly one useful h1; follow heading order; inspect link/button/form names; review image alt; look for ARIA that contradicts native behavior.
+Block if: controls are unlabeled, meaningful images lack equivalent alt, landmarks/headings hide structure, ARIA lies, or repeated links have ambiguous purpose.
+False positives: do not report visual taste, layout preference, or keyboard/contrast issues unless semantic markup is the root cause.
+Example: location=footer h4 after h2 | evidence=heading jumps h2 to h4 | impact=screen-reader outline implies missing sections | fix=use h3 or non-heading labels.
+Accept only if: structure is navigable, names/roles are accurate, alt text is appropriate, and no semantic regression hides content.`,
+  keyboard: `Mission: keyboard-only and motor accessibility for every task path.
+WCAG focus: 2.1.1 Keyboard; 2.1.2 No Keyboard Trap; 2.1.4 Character Key Shortcuts; 2.4.1 Bypass Blocks; 2.4.3 Focus Order; 2.4.7 Focus Visible; 2.5.5 Target Size Enhanced; 2.5.8 Target Size Minimum.
+Audit procedure: list interactive elements; verify tab reachability; check activation; compare focus order to reading order; inspect skip link and in-page anchors; verify visible focus; check target size/spacing; flag pointer-only behavior.
+Block if: primary CTA is unreachable/broken, focus disappears, a trap exists, tab order changes meaning, or hover-only content lacks keyboard access.
+False positives: do not fail for aesthetics or contrast unless focus/targets become unusable.
+Example: location=nav Apply link | evidence=href #apply but no matching id | impact=keyboard activation gives no destination | fix=add id to CTA section or correct href.
+Accept only if: all task controls are keyboard reachable, focus is obvious, activation works, and no trap or broken anchor remains.`,
+  cognitive: `Mission: comprehension, predictable navigation, and task clarity.
+WCAG focus: 2.4.4 Link Purpose; 2.4.6 Headings and Labels; 3.2.3 Consistent Navigation; 3.2.4 Consistent Identification; 3.3.2 Labels or Instructions; 3.3.5 Help; 3.3.7 Redundant Entry.
+Audit procedure: identify the primary task; compare CTA language; check labels/instructions; verify nav names match destinations; look for conflicting terminology; ensure dates/location/schedule/judging details remain clear.
+Block if: the main action is ambiguous, apply/register language conflicts, key instructions vanish, navigation labels mislead, or the page becomes generic marketing copy.
+False positives: do not report grammar polish or personal copy taste unless user impact is concrete.
+Example: location=hero and nav CTAs | evidence=nav says Apply, button says Register, copy says apply early | impact=users cannot tell if this is one action or two | fix=use one term or add clarifying sentence.
+Accept only if: purpose, task flow, labels, and key details are understandable and consistent.`,
+  visual: `Mission: low-vision usability, contrast, zoom, reflow, and visual affordances.
+WCAG focus: 1.4.1 Use of Color; 1.4.3 Contrast Minimum; 1.4.4 Resize Text; 1.4.10 Reflow; 1.4.11 Non-text Contrast; 1.4.12 Text Spacing; 2.4.11 Focus Not Obscured; 2.4.13 Focus Appearance.
+Audit procedure: review axe contrast; inspect text and UI boundaries; check focus appearance contrast; verify mobile overflow result; inspect likely 200% zoom/reflow risks; look for clipped, overlapping, or unreadable content.
+Block if: meaningful text fails contrast, mobile horizontal scroll remains, content clips at zoom, focus indicator is too subtle, or color alone carries meaning.
+False positives: do not require a different brand style if contrast, reflow, and readability pass.
+Example: location=footer copyright | evidence=#4a4a4a on black is about 2.35:1 | impact=low-vision users cannot read legal/context text | fix=lighten text to a token meeting 4.5:1.
+Accept only if: text/UI contrast, focus appearance, mobile layout, and reflow are usable.`,
+  preservation: `Mission: prevent accessibility fixes from destroying the original product.
+WCAG support: 2.4.4 Link Purpose; 2.4.6 Headings and Labels; 3.2.3 Consistent Navigation; plus factual/content integrity.
+Audit procedure: compare facts and brief against transformed page; verify links/CTAs; check logos/images; preserve dates, locations, sponsors, partners, contact info, and claims; judge whether brand vibe is still recognizable.
+Block if: primary CTA/link is missing, sponsors or key details disappear, facts are invented/changed, the page becomes generic, or content was deleted only to pass axe.
+False positives: do not demand identical layout; accessible restructuring is allowed when content, task flow, and vibe survive.
+Example: location=partner section | evidence=original listed Microsoft and sponsors, transformed omits them | impact=material event credibility/content lost | fix=restore sponsor names/logos accessibly.
+Accept only if: core content, links, factual claims, and recognizable identity are preserved or replaced with an accessible equivalent.`,
 };
 
 const TARGETED_EVIDENCE =
@@ -98,6 +134,19 @@ const COMPACT_OUTPUT =
 // tree index and read individual criteria on demand instead of loading the spec.
 const WCAG_REFERENCE =
   "WCAG 2.2 reference: reference/wcag/index.md is the principle/guideline/success-criterion tree; reference/wcag/sc/<file>.md holds one criterion's normative text; reference/wcag/glossary.md defines terms. Read individual criteria only when you need them; never load the whole set. Compact axe violations carry a `wcag` array naming the success criteria each violation maps to, each with a `ref` path into reference/wcag/sc/.";
+
+const SPECIALIST_REVIEW_METHOD = `Specialist review method:
+1. Start with checks.json. If it fails, your vote cannot be accept.
+2. Read solver-result.json to understand claimed fixes, removed content, residual risks, resolvedFindings, and unresolvedFindings.
+3. Compare against brief.md and facts.json so you judge the actual page, not a generic accessibility ideal.
+4. Inspect transformed.html only where your rubric points or where checks/solver evidence is ambiguous.
+5. Use axe as evidence, not the full audit. If a compact violation maps to WCAG, read that specific reference file before making a nuanced call.
+6. Classify only concrete user-impacting issues. A finding needs location, observable evidence, impact, and a fix.
+7. Prefer one strong blocker over many weak comments. Do not duplicate another specialist's issue unless your role sees a distinct user impact.
+8. Before accepting, ask: would a user in my specialty complete the primary task without avoidable confusion, loss, or barrier?
+
+Severity guide: high blocks a key task or hides/lies about important content; medium impairs navigation, comprehension, operation, or reflow but has a workaround; low is advisory polish with limited impact.
+Vote guide: accept means no high/medium role issue remains; revise means fixable high/medium issue remains; block means serious accessibility or preservation damage, broken task flow, or generic/destructive rewrite.`;
 
 function fileList(paths: string[]) {
   return paths.map((path) => `- ${path}`).join("\n");
@@ -144,7 +193,7 @@ Write brief.md with these sections:
 - Page purpose and vibe: 4-8 bullets covering the actual purpose, distinctive brand/visual tone, key CTAs, links, images/logos, schedule/details, judging criteria, partners/sponsors, and anything substantive that must not be lost. Do not require the original layout or section order unless it is essential to the task.
 - Allowed removals: only evidence-supported non-substantive content such as a Lovable badge, decorative duplicates, empty wrappers, or duplicate inaccessible controls with an accessible equivalent.
 - Top accessibility evidence: at most 8 bullets. Group related axe violations and human-review risks by affected area; cite compact ids/targets only.
-- Reviewer focus: one short line per reviewer role, only naming what that role should uniquely verify. Avoid repeating the same task under multiple roles.
+- Reviewer focus: one short line each for semantic, keyboard, cognitive, visual, and preservation specialists. Name only what that specialist should uniquely verify.
 - Acceptance bar: 2-4 bullets covering automated checks, human accessibility, responsive/keyboard usability, retained content, and recognizable vibe.
 
 ${COMPACT_OUTPUT}
@@ -212,6 +261,7 @@ Required accessibility baseline:
 - Use native HTML before ARIA. If ARIA is needed, follow WAI-ARIA Authoring Practices for roles, states, properties, names, keyboard behavior, and landmarks.
 
 Implementation guidance:
+- Work in this order: preserve truth and task flow; fix deterministic check failures; resolve reviewer vote issues from prior iterations; improve human accessibility; preserve recognizable visual identity.
 - Start from the best prior transformed.html when it kept the original content and vibe. If transformed.html does not exist, copy original.html to transformed.html with cp, then edit transformed.html in place. If a prior transformed.html became generic or lost content, restore from original.html with targeted copies or by replacing transformed.html from original.html once, then improve it.
 - Make the clearest effective accessibility change, even if it restructures the page. Prefer understandable, robust, accessible UI over preserving fragile original layout details. Keep original assets and hrefs unless broken, inaccessible, or replaced with an equivalent accessible fallback.
 - When adding CSS overrides for Tailwind-like classes that contain slash opacity, escape the slash in selectors and cover every used variant in transformed.html; examples include text-foreground/60 and bg-background/85.
@@ -219,7 +269,7 @@ Implementation guidance:
 - Ensure transformed.html can be served directly from the run directory without external build steps.
 
 solver-result.json must be valid JSON. Keep at least this compatible shape and add simple fields if helpful:
-{ "changed": true, "summary": "string", "accessibilityFixes": ["string"], "preservationNotes": ["string"], "removedContent": ["string"], "residualRisks": ["string"] }`,
+{ "changed": true, "summary": "string", "accessibilityFixes": ["string"], "preservationNotes": ["string"], "removedContent": ["string"], "residualRisks": ["string"], "resolvedFindings": ["string"], "unresolvedFindings": ["string"] }`,
   // Votes run after automated checks. They should use checks.json as the compact
   // source of truth, and only open checks-full.json if a specific compact node is
   // too ambiguous to judge.
@@ -230,7 +280,11 @@ solver-result.json must be valid JSON. Keep at least this compatible shape and a
 
 Run directory: ${runDir}
 Use brief.md and compact current artifacts; do not re-load unchanged source artifacts wholesale.
-Your review focus: ${roleCriteria[reviewer.id] || "use the role described above."}
+Specialist rubric:
+${reviewerRubrics[reviewer.id] || "Use the reviewer role described above. Ground every issue in WCAG, user impact, and observable evidence."}
+
+${SPECIALIST_REVIEW_METHOD}
+
 Available current files:
 ${fileList([
   join(runDir, "brief.md"),
@@ -244,6 +298,8 @@ ${WCAG_REFERENCE}
 Output: ${join(iterDir, "votes", `${reviewer.id}.json`)}
 
 Compare transformed.html against the original evidence, brief, solver result, and automated checks. Vote on accessibility improvement, task success, content retention, and recognizable brand vibe. Do not penalize layout changes by themselves.
+
+When reporting issues, prefer WCAG-backed, user-impacting findings over generic advice. A valid finding needs element/section evidence, user impact, and a concrete fix. Do not invent missing content or fail a page for subjective style preference.
 
 Accept only when:
 - checks.json passes, including axe, one h1, main, and no mobile horizontal overflow;
@@ -259,8 +315,8 @@ Vote block when there is a serious accessibility failure, checks fail, important
 
 Score 0-100. Suggested scale: 90-100 accept with minor residual risk; 70-89 revise; below 70 block for serious issue or destructive simplification. The reason must be short but specific, citing evidence such as check failure, missing content, element text, or remaining issue.
 
-Write exactly this tiny JSON shape:
-{ "vote": "accept" | "revise" | "block", "score": number, "reason": "short reason" }`,
+Write valid JSON. Keep these compatible fields and add the simple arrays:
+{ "vote": "accept" | "revise" | "block", "score": number, "reason": "short reason", "blockingIssues": ["id or short issue"], "resolvedFindings": ["id or short issue"], "unresolvedFindings": ["id or short issue"] }`,
   // The decision phase is deliberately conservative: automated pass is required,
   // but preservation regressions or human-review blocks still force another loop.
   decisionPrompt: ({
@@ -286,12 +342,12 @@ Write exactly this JSON shape:
 Decision rules:
 - checksPass must reflect checks.json, not reviewer optimism.
 - Use accept only when checks pass, there are no block votes, reviewers mostly accept, accessibility is materially improved, core content/tasks remain intact, and the brand vibe is recognizable.
-- Use continue when checks fail, important findings remain fixable, reviewers request revise, or the candidate passes axe but still drops important content, loses links/images, loses brand vibe, has ambiguous CTAs, breaks task flow, or looks like a generic page.
+- Use continue when checks fail, reviewer JSON lists blockingIssues or unresolvedFindings, reviewers request revise, or the candidate passes axe but still drops important content, loses links/images, loses brand vibe, has ambiguous CTAs, breaks task flow, or looks like a generic page.
 - Treat failed axe color-contrast as fixable after a color/theme change unless the failure has already persisted through a targeted color-repair iteration or the run has exhausted its iteration budget.
 - Use stop_with_risks only when further iterations are unlikely to improve within this run, and explain the residual risks clearly.
 - If the transformed page appears worse than original, destructive, generic, or content-poor, prefer continue unless retry limits or repeated failures make stop_with_risks more honest. Do not continue solely because layout changed.
 
-The reason should mention the decisive evidence: automated pass/fail, accept/block counts, major unresolved accessibility items, and preservation status.`,
+The reason should mention the decisive evidence: automated pass/fail, accept/block counts, unresolved specialist issues, and preservation status.`,
 };
 
 async function scan(url: string, { runDir }: { runDir: string }) {

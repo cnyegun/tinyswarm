@@ -127,10 +127,10 @@ try {
   if (!report.includes('class="utility-bar"')) throw new Error("report.html did not use the design-system utility bar");
   if (report.includes("<pre>")) throw new Error("report.html still uses the old markdown pre wrapper");
   if (!brief.includes("Mock accessibility brief")) throw new Error("brief.md was not served");
-  if (sessionCount !== 4) throw new Error(`expected 4 reused sessions, got ${sessionCount}`);
+  if (sessionCount !== 7) throw new Error(`expected 7 reused sessions, got ${sessionCount}`);
   if (!prompts.some(p => p.text.includes("Output:") && p.text.includes("brief.md"))) throw new Error("brief prompt missing");
   if (prompts.some(p => p.text.includes("findings/"))) throw new Error("reviewer findings should not run");
-  if (prompts.filter(p => /^Output: .+\/votes\//m.test(p.text)).length !== 2) throw new Error("expected 2 reviewer votes after checks passed");
+  if (prompts.filter(p => /^Output: .+\/votes\//m.test(p.text)).length !== 5) throw new Error("expected 5 reviewer votes after checks passed");
   if (new Set(prompts.filter(p => p.text.includes("swarm orchestrator")).map(p => p.sessionID)).size !== 1) throw new Error("orchestrator session was not reused");
   if (prompts.some(p => p.text.includes("aggregate-feedback.json"))) throw new Error("aggregate prompt should not run");
   if (!prompts.some(p => p.text.includes("Color fixes must repair the whole computed color system") && p.text.includes("bg-background/85"))) throw new Error("fix prompt missing color guardrail");

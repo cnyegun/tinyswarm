@@ -195,9 +195,24 @@ test("accessibility prompts keep sidecars targeted and prior iteration exact", (
     reviewer,
   );
   assert.match(vote, /checks-full\.json/);
-  assert.match(vote, /Your review focus:/);
+  assert.match(vote, /Specialist rubric:/);
+  assert.match(vote, /Specialist review method:/);
+  assert.match(vote, /WCAG focus:/);
+  assert.match(vote, /Audit procedure:/);
+  assert.match(vote, /False positives:/);
+  assert.match(vote, /Example:/);
+  assert.match(vote, /Accept only if:/);
+  assert.match(vote, /blockingIssues/);
+  assert.match(vote, /unresolvedFindings/);
   assert.match(vote, /Do not penalize layout changes/);
   assert.doesNotMatch(vote, /aggregate-feedback/);
+
+  assert.deepEqual(
+    accessibilityProfile.reviewers.map((item) => item.id),
+    ["semantic", "keyboard", "cognitive", "visual", "preservation"],
+  );
+  assert.match(firstFix, /resolvedFindings/);
+  assert.match(firstFix, /preserve truth and task flow/);
 });
 
 function assertCompactViolationShape(violation, nodeCount) {
