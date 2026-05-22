@@ -134,6 +134,42 @@ node; three helpers each used in exactly one place.
   fail with an informative `compact.wcag missing 1.4.3 entry` — better than
   a silent miss.
 
+### Session 3 — route per-role model overrides through reporter.line (branch `refactor/session-3`)
+
+**Target picked:** Candidate G from the session 1 list — the two
+`console.log()` calls in `src/core.ts` that announced
+`SWARM_ORCHESTRATOR_MODEL` / `SWARM_FIXER_MODEL` overrides while bypassing
+the reporter.
+
+**What worked:**
+- Wrote one observability test first asserting the override announcements
+  reach `reporter.line`. The test failed against the existing code —
+  proof it actually exercises the bypass, not some adjacent surface.
+  Then made the smallest fix that flipped it green.
+- The fix was literally `console.log(...)` → `line(run, ...)`, twice.
+  Diff is two `if` blocks where only the call name changed.
+- This was a bug, not just consistency: `--json-events` mode (web.ts +
+  Rust TUI consumers) parses stdout as one JSON event per line. The
+  previous `console.log` calls injected non-JSON text whenever per-role
+  models were configured. The JSON reporter has no `line` callback, so
+  routing through `line()` cleanly drops them; the CLI default still
+  prints them via `consoleReporter.line → console.log`.
+
+**What I tried and abandoned:**
+- Initially committed the failing test alone before the fix (TDD-style
+  red-then-green). That broke the "every commit leaves tests passing"
+  rule — the next session couldn't start cleanly at that commit. Reset
+  with `git reset --soft HEAD~1` and bundled test + fix into one green
+  commit. Lesson: tests-first means *written* first, not *committed*
+  first; the red phase belongs in the working tree, not in git history.
+
+**Surprises:**
+- The bypass had been there at least since the core.ts split (session 0).
+  Easy to miss because the lines only print under env conditions the
+  default CLI flow never triggers; a JSON-mode regression would only
+  show up if a downstream consumer reported "garbled JSON" — and only
+  when the user set per-role model envs.
+
 ## Candidates for future sessions
 
 Specific file:line targets, ranked by suspected payoff. Each entry is meant
@@ -214,21 +250,10 @@ Rename `web.ts`'s type to `WebRun` or similar.
 
 **Why complex:** confusing when reading both files. Pure renaming.
 
-### G. `core.ts:217-239` — orchestrator/fixer model variant logging
+### G. ~~`core.ts` orchestrator/fixer model variant logging~~ — DONE (session 3)
 
-```ts
-if (modelName(orchestratorModel) !== modelName(model) || ...) console.log(...)
-if (modelName(fixerModel) !== modelName(model) || ...) console.log(...)
-```
-
-Two ad-hoc `console.log` calls (not through reporter) that print only when
-a per-role override differs. They bypass the reporter abstraction.
-
-**Why complex:** two channels (line + console.log) carry first-startup info.
-Inconsistent with everything else.
-
-**Smallest change that helps:** route through `line(run, ...)` so the
-capturing reporter sees them too.
+Routed through `line(run, ...)`. Was a real bug for `--json-events` mode,
+not just a consistency issue.
 
 ### H. `core.ts:175-181` — final line block at run completion
 
@@ -249,6 +274,16 @@ Lines 30-54: `AxeCheckInput`, `AxeNodeInput`, `AxeViolationInput` types are
 don't expose the input shapes cleanly. The duplication is real but probably
 unavoidable; investigated and chose not to touch in session 2. Mentioned
 here so a future session doesn't burn time on it.
+
+### J. (discovered session 3) reporter coverage audit — already clean
+
+Session 3 audited `grep -rn "console\.\(log\|error\|warn\)" src/` to check
+for other reporter bypasses. All remaining direct `console` calls are
+legitimate boundaries: `src/index.ts` CLI startup before `runSwarm`
+exists, `src/web.ts` top-level web server log lines outside any run,
+and `src/reporter.ts` consoleReporter's own implementation. No further
+bypass to flag — don't repeat this audit unless a new entry point is
+added.
 
 ## What NOT to do
 
