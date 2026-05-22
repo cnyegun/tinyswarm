@@ -390,6 +390,8 @@ function prepareRun(
     reporter,
   };
   const model = modelSpec();
+  const orchestratorModel = modelSpec("orchestrator");
+  const fixerModel = modelSpec("fixer");
 
   line(run, `Run: ${shown(rootDir, runDir)}`);
   line(run, `Log: ${shown(rootDir, run.logFile)}`);
@@ -397,6 +399,10 @@ function prepareRun(
     run,
     `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
   );
+  if (modelName(orchestratorModel) !== modelName(model))
+    console.log(`Orchestrator model: ${modelName(orchestratorModel)} (variant=${orchestratorModel.variant})`);
+  if (modelName(fixerModel) !== modelName(model))
+    console.log(`Fixer model: ${modelName(fixerModel)} (variant=${fixerModel.variant})`);
 
   emit(run, {
     type: "run_start",
@@ -424,6 +430,8 @@ function prepareRun(
     agent: process.env.SWARM_AGENT || "build",
     model: modelName(model),
     variant: model.variant,
+    orchestratorModel: modelName(orchestratorModel),
+    fixerModel: modelName(fixerModel),
     timeoutMs: Number(process.env.SWARM_AGENT_TIMEOUT_MS || 900000),
     pid: process.pid,
     node: process.version,
@@ -884,7 +892,7 @@ async function sessionFor(
     log(run, "session", "reuse", { key, id: harness.sessions[key] });
     return harness.sessions[key];
   }
-  const model = modelSpec();
+  const model = modelSpec(key);
   const agent = process.env.SWARM_AGENT || "build";
   const title = `swarm ${key} ${relative(run.rootDir, run.runDir)}`;
   const sessionStarted = Date.now();
@@ -969,7 +977,7 @@ async function promptAgent(
   text: string,
 ) {
   const sessionID = await sessionFor(harness, run, key);
-  const model = modelSpec();
+  const model = modelSpec(key);
   const agent = process.env.SWARM_AGENT || "build";
   const before = outputTimes(outputs);
   mkdirSync(dirname(promptFile), { recursive: true });
@@ -1331,15 +1339,17 @@ function listen(server: Server, port: number) {
 }
 
 /**
- * Parses the `SWARM_MODEL` environment variable into its constituent parts.
+ * Parses `SWARM_MODEL` into its constituent parts.
+ * `SWARM_ORCHESTRATOR_MODEL` and `SWARM_FIXER_MODEL` override it for those sessions.
  * Expected format: `<providerID>/<modelID>` (e.g. `"deepseek/deepseek-v4-flash"`).
  *
  * @returns Object with `providerID`, `modelID`, and `variant`.
  */
-function modelSpec() {
-  const [providerID, ...rest] = (
-    process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash"
-  ).split("/");
+function modelSpec(key?: string) {
+  let model = process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash";
+  if (key === "orchestrator") model = process.env.SWARM_ORCHESTRATOR_MODEL || model;
+  if (key === "fixer") model = process.env.SWARM_FIXER_MODEL || model;
+  const [providerID, ...rest] = model.split("/");
   return {
     providerID,
     modelID: rest.join("/"),

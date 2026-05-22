@@ -415,6 +415,28 @@ test("runSwarm passes configured agent, model, variant, title, and permissions t
   }
 });
 
+test("runSwarm can use pro model for orchestrator and fixer only", async () => {
+  const result = await runScenario("orchestrator-fixer-model-env");
+
+  assert.equal(result.error, undefined);
+  for (const { key, request } of result.sessionRequests) {
+    const isPro = key === "orchestrator" || key === "fixer";
+    assert.deepEqual(request.model, {
+      providerID: isPro ? "pro-provider" : "flash-provider",
+      id: isPro ? "pro-model" : "flash-model",
+      variant: "max",
+    });
+  }
+  for (const { phase, request } of result.promptRequests) {
+    const isPro = !["findings", "vote"].includes(phase);
+    assert.deepEqual(request.model, {
+      providerID: isPro ? "pro-provider" : "flash-provider",
+      modelID: isPro ? "pro-model" : "flash-model",
+    });
+    assert.equal(request.variant, "max");
+  }
+});
+
 async function runScenario(name) {
   const distCore = join(repoRoot, "dist/core.js");
   const srcCore = join(repoRoot, "src/core.ts");
