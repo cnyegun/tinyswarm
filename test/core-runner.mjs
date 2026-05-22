@@ -144,6 +144,14 @@ const scenarios = {
     timeoutMs: "100",
     expectError: /timed out waiting for/,
   },
+  "prompt-timeout-quiet": {
+    maxIterations: "3",
+    checks: [true],
+    decisions: ["accept"],
+    omitOutputsForPhase: "brief",
+    timeoutMs: "1200",
+    expectError: /timed out waiting for/,
+  },
   "session-create-error": {
     maxIterations: "3",
     checks: [true],

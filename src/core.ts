@@ -1761,7 +1761,6 @@ async function promptAgent(
     status: "accepted",
     sessionID: shortID(sessionID),
   });
-  progress(run, phase, `${key} accepted in ${duration(promptStarted)}`);
   const finalOutputs = await waitForOutputs(run, outputs, before, {
     key,
     phase,
@@ -1852,7 +1851,8 @@ function fileState(rootDir: string, path: string) {
  * the `before` baseline, or until the configured timeout elapses.
  *
  * Uses a 500 ms sleep between polls to avoid hot-spinning while outputs are being written.
- * Logs progress at `SWARM_WAIT_LOG_INTERVAL_MS` intervals (default 10 s).
+ * Periodic wait snapshots are written to `swarm.log`, not stdout. Console output
+ * stays event-driven so long-running agents do not spam the terminal.
  *
  * @param run - Current run state for display paths and logging.
  * @param outputs - Absolute paths that must exist and have newer mtimes.
@@ -1889,11 +1889,6 @@ async function waitForOutputs(
         elapsedMs: Date.now() - startedAt,
         outputs: states,
       });
-      progress(
-        run,
-        details.phase,
-        `${details.key} ${waitSummary(states, startedAt)}`,
-      );
       nextLogAt = Date.now() + logIntervalMs;
     }
     await sleep(500);
@@ -2138,28 +2133,6 @@ function formatStates(states: FileOutputState[]) {
         : `${outputName(state.path)}=missing`,
     )
     .join(" ");
-}
-
-/**
- * Produces a human-readable wait status summary for the progress line emitted
- * while polling for agent outputs.
- *
- * @param states - Current output states from {@link outputStates}.
- * @param startedAt - Epoch ms when the wait loop started.
- */
-function waitSummary(states: FileOutputState[], startedAt: number) {
-  const done = states
-    .filter((state) => state.exists && state.changed)
-    .map((state) => outputName(state.path));
-  const missing = states
-    .filter((state) => !(state.exists && state.changed))
-    .map((state) => outputName(state.path));
-  const parts = [
-    `${done.length ? "partial" : "waiting"} ${duration(startedAt)}`,
-  ];
-  if (done.length) parts.push(`done=${done.join(",")}`);
-  if (missing.length) parts.push(`missing=${missing.join(",")}`);
-  return parts.join(" ");
 }
 
 /**

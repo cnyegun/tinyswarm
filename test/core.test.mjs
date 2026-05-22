@@ -96,6 +96,7 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
   assert.match(log, /decision accept/);
   assert.match(log, /run completed/);
   assert.match(log, /opencode leaving external server open/);
+  assert.equal(result.consoleLines.some((line) => line.startsWith("[scan]")), true);
 });
 
 test("runSwarm waits for stale pre-existing outputs to be rewritten", async () => {
@@ -300,6 +301,19 @@ test("runSwarm times out when an accepted prompt does not produce its expected o
 
   const log = await readText(result.runDir, "swarm.log");
   assert.match(log, /prompt wait timeout/);
+});
+
+test("runSwarm keeps stdout quiet while waiting for prompt outputs", async () => {
+  const result = await runScenario("prompt-timeout-quiet");
+
+  assert.match(result.error, /timed out waiting for .*brief\.md/);
+  assert.equal(
+    result.consoleLines.some((line) => /\b(waiting|partial)\b|missing=/.test(line)),
+    false,
+  );
+
+  const log = await readText(result.runDir, "swarm.log");
+  assert.match(log, /prompt wait/);
 });
 
 test("runSwarm propagates opencode session creation failures", async () => {
