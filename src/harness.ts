@@ -354,37 +354,19 @@ export async function promptAgent(
       parts: [{ type: "text", text }],
     })
     .catch((error: unknown) => {
-      log(run, "prompt", "submit threw", {
-        key,
-        sessionID,
-        elapsedMs: Date.now() - promptStarted,
-        error: describe(error),
-      });
-      emit(run, {
-        type: "prompt",
-        phase,
-        agent: key,
-        status: "failed",
-        sessionID: shortID(sessionID),
-        error: describe(error),
-      });
+      reportPromptFailed(run, phase, key, sessionID, promptStarted, "submit threw", error);
       throw error;
     });
   if (result.error) {
-    log(run, "prompt", "submit error", {
+    reportPromptFailed(
+      run,
+      phase,
       key,
       sessionID,
-      elapsedMs: Date.now() - promptStarted,
-      error: describe(result.error),
-    });
-    emit(run, {
-      type: "prompt",
-      phase,
-      agent: key,
-      status: "failed",
-      sessionID: shortID(sessionID),
-      error: describe(result.error),
-    });
+      promptStarted,
+      "submit error",
+      result.error,
+    );
     throw new Error(
       `session prompt failed for ${key}: ${describe(result.error)}`,
     );
@@ -393,7 +375,7 @@ export async function promptAgent(
     key,
     sessionID,
     elapsedMs: Date.now() - promptStarted,
-    response: summarizeData(result.data),
+    response: summarizeResponse(result.data),
   });
   emit(run, {
     type: "prompt",
@@ -564,28 +546,43 @@ export function modelName(model: { providerID: string; modelID: string }) {
   return `${model.providerID}/${model.modelID}`;
 }
 
-/**
- * Reduces an arbitrary response object to a small summary suitable for log lines,
- * avoiding the cost of serializing large agent payloads in full.
- */
-function summarizeData(data: unknown) {
-  if (data === null || data === undefined || typeof data !== "object")
-    return data;
-  if (Array.isArray(data)) return { type: "array", length: data.length };
+// Keeps the "prompt accepted" log line bounded: the SDK returns a message
+// object whose `parts` array can be huge after a long agent run.
+function summarizeResponse(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
   const obj = data as Record<string, unknown>;
-  const summary: Record<string, unknown> = {
-    keys: Object.keys(obj).slice(0, 20),
+  return {
+    id: obj.id,
+    sessionID: obj.sessionID,
+    role: obj.role,
+    time: obj.time,
   };
-  for (const key of [
-    "id",
-    "sessionID",
-    "messageID",
-    "role",
-    "type",
-    "status",
-  ]) {
-    if (key in obj) summary[key] = obj[key];
-  }
-  if ("time" in obj) summary.time = obj.time;
-  return summary;
+}
+
+// Shared shape for both "submit threw" (SDK rejection) and "submit error"
+// (SDK returned a 2xx with an error body). Two log messages, one event shape.
+function reportPromptFailed(
+  run: RunState,
+  phase: string,
+  key: string,
+  sessionID: string,
+  startedAt: number,
+  logMessage: string,
+  error: unknown,
+) {
+  const message = describe(error);
+  log(run, "prompt", logMessage, {
+    key,
+    sessionID,
+    elapsedMs: Date.now() - startedAt,
+    error: message,
+  });
+  emit(run, {
+    type: "prompt",
+    phase,
+    agent: key,
+    status: "failed",
+    sessionID: shortID(sessionID),
+    error: message,
+  });
 }
