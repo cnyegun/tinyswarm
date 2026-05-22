@@ -6,6 +6,7 @@ import {
 } from "@opencode-ai/sdk/v2";
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -14,7 +15,28 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
-
+import { aggregate, writeAggregate, type ScoredFinding } from "./aggregate.js";
+import { decide, writeDecision } from "./decide.js";
+import {
+  EnergyMeter,
+  extractTokens,
+  type LLMCall,
+  type ManualBaseline,
+} from "./energy.js";
+import {
+  AuditTrail,
+  hashInputFiles,
+  hashText,
+  type ActionType,
+} from "./audit-trail.js";
+import { callLLM } from "./llm-client.js";
+import {
+  applyPatches,
+  type PatchBlock,
+  FIX_PATCH_SCHEMA,
+  type FixPatchResult,
+} from "./patch-applier.js";
+import { z } from "zod";
 /**
  * Identifies a reviewer agent participating in the swarm evaluation loop.
  * Each reviewer runs independently in its own opencode session and produces
@@ -98,8 +120,8 @@ export type IterationPaths = RunPaths & {
  * - A set of named reviewer agents and the prompt templates they use
  *
  * The swarm harness calls these methods in a fixed order:
- * `scan → briefPrompt → [findingsPrompt → aggregatePrompt → fixPrompt →
- * check → votePrompt → decisionPrompt]* → reportPrompt`
+ * `scan → briefPrompt → [findingsPrompt → (aggregate deterministic) → fixPrompt →
+ * check → votePrompt → (decide deterministic)]* → reportPrompt`
  *
  * @example
  * ```typescript
@@ -111,6 +133,9 @@ export type IterationPaths = RunPaths & {
  *   async check(ctx, iter) { return { passed: true, failures: [] }; },
  *   briefPrompt: (ctx) => `Fix the accessibility issues in ${ctx.runDir}/original.html`,
  *   // ... remaining prompt methods
+ *   OPTIONAL: deterministic baseline for energy/cost comparison.
+ *   If present, the energy report includes percent-reduction figures.
+ *   manualBaseline?: () => ManualBaseline;
  * };
  * ```
  */
@@ -143,47 +168,46 @@ export type SwarmProfile = {
   check(ctx: RunPaths, iteration: number): Promise<CheckResult>;
 
   /**
-   * Returns the prompt that instructs the orchestrator to produce `brief.md` —
-   * a high-level task description consumed by all subsequent agent prompts.
+   * Returns system + user prompt parts for the brief LLM call.
+   * `system` is static (role, output format). `user` is dynamic (run paths, file list).
    */
-  briefPrompt(ctx: RunPaths): string;
+  briefPrompt(ctx: RunPaths): { system: string; user: string };
 
   /**
-   * Returns the prompt for a reviewer agent to produce its `findings/<id>.json`
-   * for the current iteration.
+   * Returns system + user prompt parts for a reviewer findings LLM call.
+   * `system` is static per reviewer role (criteria, output schema).
+   * `user` is dynamic per iteration (file list, state delta).
    */
-  findingsPrompt(ctx: IterationPaths, reviewer: Reviewer): string;
+  findingsPrompt(ctx: IterationPaths, reviewer: Reviewer): { system: string; user: string };
+
 
   /**
-   * Returns the prompt that instructs the orchestrator to merge all reviewer
-   * findings into `aggregate-feedback.json` and a `solver-task.md` work order.
+   * Returns system + user prompt parts for the fixer LLM.
+   *
+   * `system` is static and cacheable (role, format, constraints, 1-shot example).
+   * `user` is dynamic per call (findings chunk + targeted HTML snippets).
+   *
+   * When `chunk` is provided the user prompt covers exactly those findings and
+   * their HTML excerpts, enabling the chunked direct-LLM loop in T2.3+.
+   * When omitted the profile falls back to loading all findings and taking the
+   * top-priority slice.
    */
-  aggregatePrompt(ctx: IterationPaths): string;
+  fixPrompt(ctx: IterationPaths, chunk?: ScoredFinding[]): { system: string; user: string };
 
   /**
-   * Returns the prompt that instructs the fixer agent to apply changes and
-   * write the updated artifact plus a `solver-result.json` summary.
+   * Returns system + user prompt parts for a reviewer vote LLM call.
+   * `system` is static per reviewer role (criteria, output schema, hard constraints).
+   * `user` is dynamic per iteration (file list, prior finding IDs for regressionChecklist).
    */
-  fixPrompt(ctx: IterationPaths): string;
+  votePrompt(ctx: IterationPaths, reviewer: Reviewer): { system: string; user: string };
+
 
   /**
-   * Returns the prompt for a reviewer agent to cast its vote (`votes/<id>.json`)
-   * based on the fixer's result and the automated check outcome.
+   * Returns system + user prompt parts for the report LLM call.
+   * `system` is static (role, report structure). `user` is dynamic (decision, artifact paths).
    */
-  votePrompt(ctx: IterationPaths, reviewer: Reviewer): string;
-
-  /**
-   * Returns the prompt that instructs the orchestrator to read all votes and
-   * write a `decision.json` with outcome, reason, and tally.
-   */
-  decisionPrompt(ctx: IterationPaths): string;
-
-  /**
-   * Returns the prompt that instructs the orchestrator to produce `report.md`
-   * and `report.html` summarizing the entire run.
-   * @param decision - Final decision from the last completed iteration, if one exists.
-   */
-  reportPrompt(ctx: RunPaths, decision?: Decision): string;
+  reportPrompt(ctx: RunPaths, decision?: Decision): { system: string; user: string };
+  manualBaseline?: () => ManualBaseline;
 };
 
 /**
@@ -208,18 +232,18 @@ type AgentHarness = {
 
 /** Explicit per-run state threaded through operational helpers. */
 type RunState = RunPaths & {
-  /** Profile executing this run. */
   profile: SwarmProfile;
-  /** Original input passed to {@link SwarmProfile.scan}. */
   input: string;
-  /** Maximum number of reviewer/fixer iterations allowed for this run. */
   maxIterations: number;
-  /** Absolute path to this run's structured log file. */
   logFile: string;
-  /** Epoch ms when this run started; used for `+Nms` log offsets. */
   started: number;
-  /** Live harness for this run, if initialized. */
   harness?: AgentHarness;
+  /** Energy + carbon meter for this run. */
+  energy?: EnergyMeter;
+  /** EU AI Act-aligned audit trail with hash chain. */
+  audit?: AuditTrail;
+  /** Map iteration → record id of the aggregate step (for parent linkage). */
+  lastAggregateRecordId?: string;
 };
 
 /**
@@ -244,8 +268,10 @@ type FileOutputState = {
   size?: number;
 };
 
-/** Grants every permission to every file pattern; applied to all swarm sessions. */
-const allowAll: PermissionRuleset = [
+// T1.4 NOTE: Restricted fixer permissions were implemented but caused the opencode agent
+// to silently stall (the agent needs workspace root list/read to orient itself).
+// Using allowAll until post-hackathon; re-investigate with opencode SDK permission docs.
+const fixerPermissions: PermissionRuleset = [
   { permission: "*", pattern: "*", action: "allow" },
 ];
 
@@ -324,6 +350,44 @@ export async function runSwarm(
     console.log(`Log: ${shown(run.rootDir, run.logFile)}`);
     console.log(`Local: http://localhost:${served.port}`);
   } finally {
+    // Flush energy report (with manual baseline if profile provides one)
+    if (run.energy) {
+      const baseline = run.profile.manualBaseline?.();
+      const energyReport = run.energy.flush(baseline);
+      log(run, "energy", "report written", {
+        callCount: energyReport.callCount,
+        totalTokens: energyReport.totalTokens,
+        kWh: energyReport.estimatedEnergyKWh.toFixed(6),
+        co2g_FI: energyReport.estimatedCO2gFinland.toFixed(3),
+        costUSD: energyReport.estimatedCostUSD.toFixed(4),
+        comparison: energyReport.comparison,
+      });
+      console.log(
+        `Energy: ${energyReport.estimatedEnergyKWh.toFixed(4)} kWh, ` +
+        `CO2 (Finland grid): ${energyReport.estimatedCO2gFinland.toFixed(2)}g, ` +
+        `Cost: $${energyReport.estimatedCostUSD.toFixed(3)}`,
+      );
+      if (energyReport.comparison) {
+        console.log(
+          `vs. manual baseline: ${energyReport.comparison.energyReductionPct.toFixed(1)}% less energy, ` +
+          `${energyReport.comparison.costReductionPct.toFixed(1)}% less cost, ` +
+          `${energyReport.comparison.timeReductionPct.toFixed(1)}% less time`,
+        );
+      }
+    }
+
+    // Flush audit trail and verify chain
+    if (run.audit) {
+      run.audit.flush();
+      const verification = run.audit.verify();
+      log(run, "audit", "chain verification", verification);
+      if (!verification.valid) {
+        console.warn(
+          `⚠ Audit chain broken at ${verification.brokenAt}: ${verification.error}`,
+        );
+      }
+    }
+
     closeHarness(run);
   }
 }
@@ -339,10 +403,10 @@ function prepareRun(
   input: string,
   rootDir: string,
 ): RunState {
-  const maxIterations = Math.max(
-    1,
-    Number(process.env.SWARM_MAX_ITERATIONS || 3),
-  );
+  const demoMode = process.env.SWARM_DEMO === "1";
+  const maxIterations = demoMode
+    ? 1
+    : Math.max(1, Number(process.env.SWARM_MAX_ITERATIONS || 3));
   const runDir = join(
     rootDir,
     "runs",
@@ -363,7 +427,7 @@ function prepareRun(
   console.log(`Run: ${shown(rootDir, runDir)}`);
   console.log(`Log: ${shown(rootDir, run.logFile)}`);
   console.log(
-    `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}`,
+    `Model: ${modelName(model)} (variant=${model.variant}), agent=${process.env.SWARM_AGENT || "build"}, maxIterations=${maxIterations}${demoMode ? " [DEMO]" : ""}`,
   );
 
   log(run, "run", "starting", {
@@ -380,8 +444,22 @@ function prepareRun(
     node: process.version,
   });
 
+  const runId = basename(runDir);
+  run.energy = new EnergyMeter({
+    runDir,
+    runId,
+    startedAt: run.started,
+  });
+  run.audit = new AuditTrail({ runDir, runId });
+
+  log(run, "instrumentation", "initialized", {
+    energy: "energy-log.jsonl + energy-report.json",
+    audit: "evidence-trail/ with SHA-256 hash chain",
+  });
+
   return run;
 }
+
 
 /**
  * Captures the source evidence before opening any agent sessions.
@@ -432,16 +510,75 @@ async function runScan(run: RunState) {
  * the same task framing instead of each agent independently interpreting raw
  * source evidence.
  */
-async function writeBrief(run: RunState, harness: AgentHarness) {
-  await promptAgent(
-    harness,
-    run,
-    "orchestrator",
-    "brief",
-    join(run.runDir, "prompts", "brief.md"),
-    [join(run.runDir, "brief.md")],
-    run.profile.briefPrompt(run),
-  );
+async function writeBrief(run: RunState, _harness: AgentHarness) {
+  const model = modelForAgent("orchestrator");
+  const profilePrompt = run.profile.briefPrompt(run);
+  const fileSection = embedFiles(filesToEmbedForBrief(run.runDir), run.runDir);
+  const userPrompt = fileSection
+    ? `${profilePrompt.user}\n\n=== FILE CONTENTS ===\n${fileSection}`
+    : profilePrompt.user;
+
+  const promptFile = join(run.runDir, "prompts", "brief.md");
+  const outputFile = join(run.runDir, "brief.md");
+  mkdirSync(dirname(promptFile), { recursive: true });
+  writeFileSync(promptFile, userPrompt);
+
+  const started = Date.now();
+  progress("brief", `direct model=${modelName(model)} prompt=${formatBytes(Buffer.byteLength(userPrompt, "utf8"))}`);
+  log(run, "prompt", "direct start", { key: "orchestrator", phase: "brief", model: modelName(model) });
+
+  const result = await callLLM({
+    model: modelName(model),
+    systemPrompt: profilePrompt.system,
+    userPrompt,
+    outputSchema: MarkdownResponseSchema,
+    maxTokens: 4000,
+    temperature: 0,
+  });
+
+  writeFileSync(outputFile, result.data.markdown);
+
+  if (run.energy) {
+    run.energy.record({
+      timestamp: new Date().toISOString(),
+      model: modelName(model),
+      variant: model.variant,
+      agentKey: "orchestrator",
+      phase: "brief",
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      elapsedMs: result.elapsedMs,
+    });
+  }
+
+  if (run.audit) {
+    run.audit.record({
+      runId: basename(run.runDir),
+      actionType: "brief",
+      agentKey: "orchestrator",
+      agentRole: "orchestrator brief phase",
+      executor: "llm",
+      modelProvider: model.providerID,
+      modelId: model.modelID,
+      modelVariant: model.variant,
+      promptHash: hashText(userPrompt),
+      promptPath: promptFile,
+      outputPaths: [outputFile],
+      outputSummary: `brief.md written (${result.data.markdown.length} chars)`,
+      elapsedMs: result.elapsedMs,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+    });
+  }
+
+  log(run, "prompt", "direct done", {
+    key: "orchestrator", phase: "brief",
+    elapsedMs: result.elapsedMs,
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
+    outputChars: result.data.markdown.length,
+  });
+  progress("brief", `done ${duration(started)} tokens=${result.usage.inputTokens}+${result.usage.outputTokens}`);
 }
 
 /**
@@ -483,58 +620,825 @@ async function runIteration(
   iteration: number,
 ): Promise<Decision> {
   const iter = prepareIteration(run, iteration);
-  await collectFindings(run, harness, iter);
-  await promptAgent(
-    harness,
-    run,
-    "orchestrator",
-    "aggregate",
-    join(iter.iterDir, "prompts", "aggregate.md"),
-    [
-      join(iter.iterDir, "aggregate-feedback.json"),
-      join(iter.iterDir, "solver-task.md"),
-    ],
-    run.profile.aggregatePrompt(iter),
+  const iterSpan = undefined;
+  try {
+    await collectFindings(run, harness, iter, iterSpan);
+
+        // Deterministic aggregation — no LLM
+        const aggregateStarted = Date.now();
+        const previousIterDir =
+          iter.iteration > 1
+            ? join(run.runDir, "iterations", pad(iter.iteration - 1))
+            : undefined;
+        const aggregateResult = aggregate({
+          iterDir: iter.iterDir,
+          runDir: run.runDir,
+          reviewers: run.profile.reviewers,
+          iteration: iter.iteration,
+          previousIterDir,
+        });
+        const { aggregatePath, solverTaskPath } = writeAggregate(
+          {
+            iterDir: iter.iterDir,
+            runDir: run.runDir,
+            reviewers: run.profile.reviewers,
+            iteration: iter.iteration,
+            previousIterDir,
+          },
+          aggregateResult,
+        );
+        log(run, "aggregate", "done (deterministic)", {
+          iteration: iter.iteration,
+          elapsedMs: Date.now() - aggregateStarted,
+          totalFindings: aggregateResult.scoredFindings.length,
+          introducedFindings: aggregateResult.introducedFindings.length,
+          priorities: aggregateResult.priorities.length,
+          warnings: aggregateResult.warnings.length,
+        });
+        if (aggregateResult.warnings.length > 0) {
+          for (const w of aggregateResult.warnings) {
+            log(run, "aggregate", "warning", { warning: w });
+          }
+        }
+        progress(
+          "aggregate",
+          `deterministic ${duration(aggregateStarted)} findings=${aggregateResult.scoredFindings.length} introduced=${aggregateResult.introducedFindings.length}`,
+        );
+
+        // Audit trail record
+        if (run.audit) {
+          const findingsPaths = run.profile.reviewers.map((r) =>
+            join(iter.iterDir, "findings", `${r.id}.json`),
+          );
+          const aggregateRecord = run.audit.record({
+            runId: basename(run.runDir),
+            iteration: iter.iteration,
+            actionType: "aggregate",
+            agentKey: "orchestrator",
+            agentRole: "deterministic aggregation step",
+            executor: "deterministic",
+            inputFilesHashes: hashInputFiles(findingsPaths),
+            outputPaths: [aggregatePath, solverTaskPath],
+            outputSummary: aggregateResult.warnings.length > 0
+              ? `${aggregateResult.summary} WARNINGS(${aggregateResult.warnings.length}): ${aggregateResult.warnings.join("; ")}`
+              : aggregateResult.summary,
+            elapsedMs: Date.now() - aggregateStarted,
+          });
+          run.lastAggregateRecordId = aggregateRecord.recordId;
+        }
+    // Snapshot artifact before patching so T2.4 rollback can revert on regression
+    const artifactPath = join(run.runDir, run.profile.artifact);
+    const snapshotPath = join(iter.iterDir, "transformed-snapshot.html");
+    if (existsSync(artifactPath)) {
+      copyFileSync(artifactPath, snapshotPath);
+    }
+    // Chunked direct-LLM fixer (replaces opencode promptAgent call)
+    await runChunkedFixer(run, iter, aggregateResult.scoredFindings);
+    await runChecks(run, iter);
+    await collectVotes(run, harness, iter, iterSpan);
+    // T3.2: refine introduced-findings count using reviewer regressionChecklists
+    const introduced = refineIntroducedFindings(
+      iter.iterDir,
+      aggregateResult.introducedFindings,
+      run.profile.reviewers,
+    );
+    // Deterministic decision — no LLM
+    const decideStarted = Date.now();
+    let decision = decide({
+      iterDir: iter.iterDir,
+      iteration: iter.iteration,
+      maxIterations: run.maxIterations,
+      reviewers: run.profile.reviewers,
+      introducedFindings: introduced.length,
+      introducedFindingsBySeverity: {
+        high: introduced.filter((f) => f.severity === "high").length,
+        medium: introduced.filter((f) => f.severity === "medium").length,
+        low: introduced.filter((f) => f.severity === "low").length,
+      },
+    });
+    // Score-based rollback: revert if this iteration worsened accessibility
+    decision = checkRegressionAndMaybeRevert(run, iter, decision, snapshotPath, artifactPath);
+    writeDecision(iter.iterDir, decision);
+    log(run, "decide", "done (deterministic)", {
+      ...decision,
+      elapsedMs: Date.now() - decideStarted,
+    });
+    progress(
+      "decide",
+      `deterministic ${duration(decideStarted)} outcome=${decision.outcome} accepts=${decision.accepts}/${decision.totalVotes ?? "?"} blocks=${decision.blocks} introduced=${decision.introducedFindings ?? 0}`,
+    );
+
+    // Audit
+    if (run.audit) {
+      const votePaths = run.profile.reviewers.map((r) =>
+        join(iter.iterDir, "votes", `${r.id}.json`),
+      );
+      run.audit.record({
+        runId: basename(run.runDir),
+        iteration: iter.iteration,
+        actionType: "decide",
+        agentKey: "orchestrator",
+        agentRole: "deterministic decision step",
+        executor: "deterministic",
+        parentRecordId: run.lastAggregateRecordId,
+        inputFilesHashes: hashInputFiles([
+          ...votePaths,
+          join(iter.iterDir, "checks.json"),
+        ]),
+        outputPaths: [join(iter.iterDir, "decision.json")],
+        outputSummary: `${decision.outcome}: ${decision.reason}`,
+        elapsedMs: Date.now() - decideStarted,
+      });
+    }
+    return decision;
+  } finally {
+    // iterSpan removed (tracing.ts deleted)
+  }
+}
+
+// ---------- Chunked fixer helpers ----------
+
+function locationsOverlap(a: ScoredFinding, b: ScoredFinding): boolean {
+  const la = (a.location ?? "").toLowerCase().trim();
+  const lb = (b.location ?? "").toLowerCase().trim();
+  if (!la || !lb) return false;
+  return la === lb || la.includes(lb) || lb.includes(la);
+}
+
+/**
+ * Partition `findings` into chunks of at most `maxPerChunk`.
+ *
+ * Sort order: high severity first, then by score descending.
+ * Overlap rule: if two findings share a location substring, pull them into the
+ * same chunk so their patches don't step on each other.
+ */
+export function chunkFindings(
+  findings: ScoredFinding[],
+  opts: { maxPerChunk: number; prioritizeBy: "severity" },
+): ScoredFinding[][] {
+  const { maxPerChunk } = opts;
+  if (findings.length === 0) return [];
+
+  const SW: Record<string, number> = { high: 3, medium: 2, low: 1 };
+  const sorted = [...findings].sort((a, b) => {
+    const sev = (SW[b.severity ?? "low"] ?? 0) - (SW[a.severity ?? "low"] ?? 0);
+    return sev !== 0 ? sev : b.score - a.score;
+  });
+
+  const chunks: ScoredFinding[][] = [];
+  const used = new Set<number>();
+
+  for (let i = 0; i < sorted.length; i++) {
+    if (used.has(i)) continue;
+    const chunk: ScoredFinding[] = [sorted[i]];
+    used.add(i);
+
+    // Transitively pull in every finding that overlaps with any finding already
+    // in this chunk (union-find via repeated passes until stable).
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (let j = 0; j < sorted.length; j++) {
+        if (used.has(j)) continue;
+        if (chunk.some((c) => locationsOverlap(c, sorted[j]))) {
+          chunk.push(sorted[j]);
+          used.add(j);
+          grew = true;
+        }
+      }
+    }
+
+    // Fill remaining slots with the next highest-priority unassigned findings.
+    for (let j = 0; j < sorted.length && chunk.length < maxPerChunk; j++) {
+      if (!used.has(j)) {
+        chunk.push(sorted[j]);
+        used.add(j);
+      }
+    }
+
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}
+
+function buildRetryUserPrompt(
+  originalUser: string,
+  previousResult: FixPatchResult,
+  error: Extract<ReturnType<typeof applyPatches>, { ok: false }>,
+): string {
+  const failedSearch = error.failedBlock?.search.slice(0, 200) ?? "(unknown)";
+  const hint =
+    error.error === "no_match"
+      ? "The search text was not found in the document. The `search` value must be a verbatim substring of the current HTML — check exact whitespace and attribute quoting."
+      : "The search text appears more than once. Extend the `search` value by 1–3 surrounding context lines to make it unique.";
+
+  const patchList = previousResult.patches
+    .map((p: FixPatchResult["patches"][number]) => `  - ${p.findingId}: "${p.search.slice(0, 80).replace(/\n/g, "↵")}"`)
+    .join("\n");
+
+  return `${originalUser}
+
+---
+RETRY — patch application failed.
+
+Error: ${error.error}
+${hint}
+
+Failed search string (first 200 chars):
+\`\`\`
+${failedSearch}
+\`\`\`
+
+Your previous patch list:
+${patchList}
+
+Respond with a corrected JSON object. You may reuse patches that would have succeeded; only revise the one(s) that caused the error.`;
+}
+
+/**
+ * Post-vote refinement of the "introduced findings" list (T3.2).
+ *
+ * After reviewers submit votes, their regressionChecklist fields identify
+ * prior-iteration findings that are `still_present`. Any current finding
+ * sharing the same ID as a `still_present` entry was NOT newly introduced —
+ * it persisted from the previous iteration. Filtering those out reduces
+ * false-positive regression counts that would otherwise trigger R3.
+ */
+function refineIntroducedFindings(
+  iterDir: string,
+  candidateIntroduced: ScoredFinding[],
+  reviewers: Array<{ id: string; name: string }>,
+): ScoredFinding[] {
+  const stillPresentIds = new Set<string>();
+  for (const reviewer of reviewers) {
+    const voteFile = join(iterDir, "votes", `${reviewer.id}.json`);
+    if (!existsSync(voteFile)) continue;
+    try {
+      const vote = JSON.parse(readFileSync(voteFile, "utf8")) as {
+        regressionChecklist?: Array<{ id?: unknown; status?: unknown }>;
+      };
+      for (const entry of vote.regressionChecklist ?? []) {
+        if (typeof entry.id === "string" && entry.status === "still_present") {
+          stillPresentIds.add(entry.id);
+        }
+      }
+    } catch { /* malformed vote file — skip silently */ }
+  }
+  if (stillPresentIds.size === 0) return candidateIntroduced;
+  return candidateIntroduced.filter((f) => !(f.id && stillPresentIds.has(f.id)));
+}
+
+function readHtmlForFix(runDir: string, targetPath: string): string {
+  for (const p of [targetPath, join(runDir, "original.html")]) {
+    if (existsSync(p)) { try { return readFileSync(p, "utf8"); } catch { /* ignore */ } }
+  }
+  return "";
+}
+
+function recordFixerEnergy(
+  run: RunState,
+  fixer: { providerID: string; modelID: string; variant: string },
+  phase: string,
+  usage: { inputTokens: number; outputTokens: number },
+  elapsedMs: number,
+): void {
+  if (!run.energy) return;
+  run.energy.record({
+    timestamp: new Date().toISOString(),
+    model: modelName(fixer),
+    variant: fixer.variant,
+    agentKey: "fixer",
+    phase,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    elapsedMs,
+  });
+}
+
+/**
+ * Placeholder regression score — higher means more accessibility issues.
+ * Sums axe impact weights (critical=4, serious=3, moderate=2, minor=1) ×
+ * node count, plus 1 per structural failure. T4.2 replaces this with a
+ * full weighted rubric.
+ */
+function regressionScore(checksPath: string): number {
+  if (!existsSync(checksPath)) return 0;
+  const IMPACT_WEIGHT: Record<string, number> = {
+    critical: 4,
+    serious: 3,
+    moderate: 2,
+    minor: 1,
+  };
+  try {
+    const checks = JSON.parse(readFileSync(checksPath, "utf8")) as CheckResult & {
+      axeViolations?: Array<{ impact?: string; nodes?: unknown[] }>;
+    };
+    let score = (checks.failures ?? []).filter((f) => !f.startsWith("axe ")).length;
+    for (const v of checks.axeViolations ?? []) {
+      const nodeCount = Array.isArray(v.nodes) ? v.nodes.length : 1;
+      score += (IMPACT_WEIGHT[v.impact ?? ""] ?? 1) * nodeCount;
+    }
+    return score;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * After checks and votes, compare regression scores to the previous iteration.
+ * If the current score is worse (delta < 0), revert the artifact to its
+ * pre-fixer snapshot and override the decision to `stop_with_risks`.
+ * Iteration 1 is always a pass (no prior data to compare against).
+ */
+function checkRegressionAndMaybeRevert(
+  run: RunState,
+  iter: IterationPaths,
+  decision: Decision,
+  snapshotPath: string,
+  artifactPath: string,
+): Decision {
+  if (iter.iteration <= 1) return decision;
+
+  const prevChecksPath = join(
+    run.runDir,
+    "iterations",
+    pad(iter.iteration - 1),
+    "checks.json",
   );
-  await promptAgent(
-    harness,
-    run,
-    "fixer",
+  const currChecksPath = join(iter.iterDir, "checks.json");
+
+  const priorScore = regressionScore(prevChecksPath);
+  const currentScore = regressionScore(currChecksPath);
+  const improvementDelta = priorScore - currentScore; // positive = improved
+
+  log(run, "decide", "regression check", {
+    iteration: iter.iteration,
+    priorScore,
+    currentScore,
+    improvementDelta,
+  });
+
+  if (improvementDelta < 0) {
+    if (existsSync(snapshotPath)) {
+      copyFileSync(snapshotPath, artifactPath);
+    }
+    log(run, "decide", "regression detected — reverted to pre-fixer snapshot", {
+      iteration: iter.iteration,
+      delta: improvementDelta,
+    });
+    progress(
+      "decide",
+      `regression delta=${improvementDelta} (prior=${priorScore} current=${currentScore}) — reverted artifact, outcome=stop_with_risks`,
+    );
+    return {
+      ...decision,
+      outcome: "stop_with_risks",
+      checksPass: false,
+      reason: `Regression: score worsened by ${Math.abs(improvementDelta)} points (prior=${priorScore}, current=${currentScore}). Reverted to pre-fix snapshot.`,
+    };
+  }
+
+  return decision;
+}
+
+async function runChunkedFixer(
+  run: RunState,
+  iter: IterationPaths,
+  scoredFindings: ScoredFinding[],
+): Promise<void> {
+  const fixerStart = Date.now();
+  const targetPath = join(run.runDir, run.profile.artifact);
+  const fixer = modelForAgent("fixer");
+  const fixerModelStr = modelName(fixer);
+
+  const chunks = chunkFindings(scoredFindings, { maxPerChunk: 5, prioritizeBy: "severity" });
+
+  log(run, "fix", "start", {
+    iteration: iter.iteration,
+    findings: scoredFindings.length,
+    chunks: chunks.length,
+    model: fixerModelStr,
+  });
+  progress("fix", `start iter=${iter.iteration} findings=${scoredFindings.length} chunks=${chunks.length}`);
+
+  let currentHtml = readHtmlForFix(run.runDir, targetPath);
+  const allFixes: string[] = [];
+  const allUnfixed: string[] = [];
+  let lastSummary = "";
+
+  if (chunks.length > 0) {
+    // System prompt is the same for every chunk — derive once.
+    const systemPrompt = run.profile.fixPrompt(iter).system;
+
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
+      const chunkStart = Date.now();
+      const chunkLabel = `fix-chunk-${ci + 1}`;
+
+      progress("fix", `chunk ${ci + 1}/${chunks.length} findings=${chunk.map((f) => f.id ?? "?").join(",")}`);
+
+      const userPrompt = run.profile.fixPrompt(iter, chunk).user;
+
+      // ── First attempt ──────────────────────────────────────────────────────
+      let firstResult: Awaited<ReturnType<typeof callLLM<typeof FIX_PATCH_SCHEMA>>>;
+      try {
+        firstResult = await callLLM({
+          model: fixerModelStr,
+          systemPrompt,
+          userPrompt,
+          outputSchema: FIX_PATCH_SCHEMA,
+          maxTokens: 8000,
+          temperature: 0,
+          jsonMode: true,
+        });
+      } catch (err) {
+        log(run, "fix", "chunk LLM error", { chunk: ci + 1, error: describe(err) });
+        for (const f of chunk) allUnfixed.push(`${f.id ?? "?"}: LLM call failed`);
+        continue;
+      }
+      recordFixerEnergy(run, fixer, chunkLabel, firstResult.usage, firstResult.elapsedMs);
+
+      let patches: PatchBlock[] = firstResult.data.patches.map((p: FixPatchResult["patches"][number]) => ({
+        search: p.search,
+        replace: p.replace,
+      }));
+      let patchResult = applyPatches(currentHtml, patches);
+
+      // ── Retry once on patch failure ────────────────────────────────────────
+      if (!patchResult.ok) {
+        const retryUser = buildRetryUserPrompt(userPrompt, firstResult.data, patchResult);
+        let retryResult: Awaited<ReturnType<typeof callLLM<typeof FIX_PATCH_SCHEMA>>>;
+        try {
+          retryResult = await callLLM({
+            model: fixerModelStr,
+            systemPrompt,
+            userPrompt: retryUser,
+            outputSchema: FIX_PATCH_SCHEMA,
+            maxTokens: 8000,
+            temperature: 0,
+            jsonMode: true,
+          });
+        } catch (err) {
+          log(run, "fix", "chunk retry LLM error", { chunk: ci + 1, error: describe(err) });
+          for (const f of chunk) allUnfixed.push(`${f.id ?? "?"}: retry LLM call failed`);
+          continue;
+        }
+        recordFixerEnergy(run, fixer, `${chunkLabel}-retry`, retryResult.usage, retryResult.elapsedMs);
+
+        patches = retryResult.data.patches.map((p: FixPatchResult["patches"][number]) => ({ search: p.search, replace: p.replace }));
+        patchResult = applyPatches(currentHtml, patches);
+
+        if (!patchResult.ok) {
+          log(run, "fix", "chunk skipped after retry", {
+            chunk: ci + 1,
+            error: patchResult.error,
+            failedSearch: patchResult.failedBlock?.search.slice(0, 80),
+            elapsedMs: Date.now() - chunkStart,
+          });
+          for (const f of chunk) allUnfixed.push(`${f.id ?? "?"}: patch ${patchResult.error} after retry`);
+          lastSummary = retryResult.data.summary;
+          if (retryResult.data.unfixed) allUnfixed.push(...retryResult.data.unfixed);
+          continue;
+        }
+
+        lastSummary = retryResult.data.summary;
+        for (const p of retryResult.data.patches) allFixes.push(`${p.findingId}: ${p.rationale}`);
+        if (retryResult.data.unfixed) allUnfixed.push(...retryResult.data.unfixed);
+      } else {
+        lastSummary = firstResult.data.summary;
+        for (const p of firstResult.data.patches) allFixes.push(`${p.findingId}: ${p.rationale}`);
+        if (firstResult.data.unfixed) allUnfixed.push(...firstResult.data.unfixed);
+      }
+
+      if (patchResult.ok) {
+        currentHtml = patchResult.updatedHtml;
+        log(run, "fix", "chunk applied", {
+          chunk: ci + 1,
+          applied: patchResult.appliedCount,
+          elapsedMs: Date.now() - chunkStart,
+        });
+      }
+    }
+  }
+
+  writeFileSync(targetPath, currentHtml);
+
+  const solverResult = {
+    changed: allFixes.length > 0,
+    summary:
+      lastSummary ||
+      `${chunks.length} chunk(s) processed, ${allFixes.length} patch(es) applied.`,
+    accessibilityFixes: allFixes,
+    preservationNotes: [] as string[],
+    removedContent: [] as string[],
+    residualRisks: allUnfixed,
+  };
+  writeFileSync(
+    join(iter.iterDir, "solver-result.json"),
+    JSON.stringify(solverResult, null, 2),
+  );
+
+  const elapsedMs = Date.now() - fixerStart;
+  log(run, "fix", "done", {
+    iteration: iter.iteration,
+    chunks: chunks.length,
+    applied: allFixes.length,
+    unfixed: allUnfixed.length,
+    elapsedMs,
+  });
+  progress(
     "fix",
-    join(iter.iterDir, "prompts", "fix.md"),
-    [
-      join(run.runDir, run.profile.artifact),
-      join(iter.iterDir, "solver-result.json"),
-    ],
-    run.profile.fixPrompt(iter),
+    `done ${duration(fixerStart)} chunks=${chunks.length} applied=${allFixes.length} unfixed=${allUnfixed.length}`,
   );
-  await runChecks(run, iter);
-  await collectVotes(run, harness, iter);
-  return decideIteration(run, harness, iter);
+
+  if (run.audit) {
+    run.audit.record({
+      runId: basename(run.runDir),
+      iteration: iter.iteration,
+      actionType: "fix",
+      agentKey: "fixer",
+      agentRole: "chunked direct-LLM fixer",
+      executor: "llm",
+      modelProvider: fixer.providerID,
+      modelId: fixer.modelID,
+      outputPaths: [targetPath, join(iter.iterDir, "solver-result.json")],
+      outputSummary: solverResult.summary,
+      elapsedMs,
+      parentRecordId: run.lastAggregateRecordId,
+    });
+  }
+}
+
+// ---------- Structured output schemas for direct LLM reviewer calls ----------
+
+const FindingsResponseSchema = z.object({
+  role: z.string(),
+  // Accept either pipe-delimited strings or structured objects; normalize to strings
+  // so aggregate.ts (which parses "key=value | key=value" format) works unchanged.
+  findings: z
+    .array(z.any())
+    .transform((items: unknown[]) =>
+      items.map((item) => {
+        if (typeof item === "string") return item;
+        if (typeof item === "object" && item !== null)
+          return Object.entries(item as Record<string, unknown>)
+            .map(([k, v]) => `${k}=${String(v ?? "")}`)
+            .join(" | ");
+        return String(item);
+      }),
+    ),
+  risk: z.enum(["low", "medium", "high"]),
+});
+
+const VoteResponseSchema = z.object({
+  vote: z.enum(["accept", "revise", "block"]),
+  score: z.number().min(0).max(100),
+  reason: z.string(),
+  regressionChecklist: z
+    .array(z.object({ id: z.string(), status: z.enum(["fixed", "still_present", "unchanged"]) }))
+    .optional(),
+});
+
+const MarkdownResponseSchema = z.object({
+  markdown: z.string(),
+});
+
+// ---------- File-embedding helpers for brief and report ----------
+
+function filesToEmbedForBrief(runDir: string): string[] {
+  return [
+    join(runDir, "facts.json"),
+    join(runDir, "axe.json"),
+    // original.html intentionally omitted — too large; facts + axe are sufficient
+  ];
+}
+
+function filesToEmbedForReport(runDir: string): string[] {
+  const latest = latestIteration(runDir); // hoisted function declaration
+  const files: string[] = [join(runDir, "brief.md")];
+  if (latest) {
+    const latestDir = join(runDir, "iterations", latest);
+    files.push(
+      join(latestDir, "decision.json"),
+      join(latestDir, "checks.json"),
+      join(latestDir, "solver-result.json"),
+      join(latestDir, "aggregate-feedback.json"),
+    );
+  }
+  return files;
+}
+
+function generateReportHtml(markdown: string, runDir: string, artifact: string): string {
+  const hasArtifact = existsSync(join(runDir, artifact));
+  const escaped = markdown
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Accessibility Remediation Report</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#222}
+nav{margin-bottom:1.5rem;padding-bottom:.75rem;border-bottom:1px solid #ddd}
+nav a{margin-right:1rem;color:#0066cc}
+pre{white-space:pre-wrap;word-wrap:break-word;background:#f6f8fa;padding:1.25rem;border-radius:6px;font-size:.9rem}
+</style>
+</head>
+<body>
+<nav>
+${hasArtifact ? `<a href="${artifact}">View transformed page</a>` : ""}
+<a href="report.md">report.md</a>
+<a href="brief.md">brief.md</a>
+</nav>
+<pre>${escaped}</pre>
+</body>
+</html>`;
+}
+
+// ---------- File-embedding helpers ----------
+
+const FILE_EMBED_LIMITS: Record<string, number> = {
+  ".html": 30_000,
+  ".json": 20_000,
+  ".md": 15_000,
+};
+
+function embedFiles(paths: string[], runDir: string): string {
+  return paths
+    .filter((p) => existsSync(p))
+    .map((p) => {
+      try {
+        const limit = FILE_EMBED_LIMITS[extname(p)] ?? 10_000;
+        const raw = readFileSync(p, "utf8");
+        const content =
+          raw.length > limit
+            ? raw.slice(0, limit) + `\n...[truncated, ${raw.length - limit}B omitted]`
+            : raw;
+        return `\n\n=== ${relative(runDir, p)} ===\n${content}`;
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean)
+    .join("");
+}
+
+function filesToEmbedForFindings(runDir: string, iteration: number): string[] {
+  if (iteration === 1) {
+    return [
+      join(runDir, "brief.md"),
+      join(runDir, "facts.json"),
+      join(runDir, "axe.json"),
+    ];
+  }
+  const prevDir = join(runDir, "iterations", pad(iteration - 1));
+  return [
+    join(runDir, "brief.md"),
+    join(runDir, "transformed.html"),
+    join(prevDir, "checks.json"),
+    join(prevDir, "aggregate-feedback.json"),
+  ];
+}
+
+function filesToEmbedForVote(runDir: string, iterDir: string): string[] {
+  return [
+    join(runDir, "transformed.html"),
+    join(iterDir, "checks.json"),
+    join(iterDir, "aggregate-feedback.json"),
+    join(iterDir, "solver-task.md"),
+    join(iterDir, "solver-result.json"),
+  ];
+}
+
+// ---------- Direct LLM reviewer phase ----------
+
+/** Runs a single reviewer for one phase (findings or vote) via direct LLM call. */
+async function directLLMPhase(
+  run: RunState,
+  reviewer: Reviewer,
+  phase: "findings" | "vote",
+  iter: IterationPaths,
+): Promise<void> {
+  const model = modelForAgent(reviewer.id);
+  const isFindings = phase === "findings";
+
+  const outputFile = isFindings
+    ? join(iter.iterDir, "findings", `${reviewer.id}.json`)
+    : join(iter.iterDir, "votes", `${reviewer.id}.json`);
+  const promptFile = join(iter.iterDir, "prompts", `${reviewer.id}-${phase}.md`);
+
+  // T3.1: profile now returns { system, user } — system is static/cacheable per role
+  const profilePrompt = isFindings
+    ? run.profile.findingsPrompt(iter, reviewer)
+    : run.profile.votePrompt(iter, reviewer);
+
+  const filePaths = isFindings
+    ? filesToEmbedForFindings(run.runDir, iter.iteration)
+    : filesToEmbedForVote(run.runDir, iter.iterDir);
+  const fileSection = embedFiles(filePaths, run.runDir);
+
+  const schemaReminder = isFindings
+    ? `\n\n## REMINDER: respond with ONLY the JSON object. role="${reviewer.id}", findings=array of pipe-delimited strings, risk=low|medium|high.`
+    : `\n\n## REMINDER: respond with ONLY the JSON object. vote=accept|revise|block, score=0-100, reason=string.`;
+
+  const userPrompt = `${profilePrompt.user}${fileSection ? `\n\n<files>\n${fileSection}</files>` : ""}${schemaReminder}`;
+
+  mkdirSync(dirname(promptFile), { recursive: true });
+  writeFileSync(promptFile, userPrompt);
+
+  const phaseStarted = Date.now();
+  progress(
+    phase,
+    `${reviewer.id} direct model=${modelName(model)} prompt=${formatBytes(Buffer.byteLength(userPrompt, "utf8"))}`,
+  );
+  log(run, "prompt", "direct start", {
+    key: reviewer.id,
+    phase,
+    model: modelName(model),
+    promptBytes: Buffer.byteLength(userPrompt, "utf8"),
+    output: shown(run.rootDir, outputFile),
+  });
+
+  const schema = isFindings ? FindingsResponseSchema : VoteResponseSchema;
+  const result = await callLLM({
+    model: modelName(model),
+    systemPrompt: profilePrompt.system,
+    userPrompt,
+    outputSchema: schema,
+    maxTokens: 2000,
+    temperature: 0,
+    jsonMode: true,
+  });
+
+  mkdirSync(dirname(outputFile), { recursive: true });
+  writeFileSync(outputFile, JSON.stringify(result.data, null, 2));
+
+  if (run.energy) {
+    run.energy.record({
+      timestamp: new Date().toISOString(),
+      model: modelName(model),
+      variant: model.variant,
+      agentKey: reviewer.id,
+      phase,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      elapsedMs: result.elapsedMs,
+    });
+  }
+
+  if (run.audit) {
+    run.audit.record({
+      runId: basename(run.runDir),
+      iteration: iter.iteration,
+      actionType: isFindings ? "findings" : "vote",
+      agentKey: reviewer.id,
+      agentRole: `${reviewer.name} in phase ${phase}`,
+      executor: "llm",
+      modelProvider: model.providerID,
+      modelId: model.modelID,
+      modelVariant: model.variant,
+      promptHash: hashText(userPrompt),
+      promptPath: promptFile,
+      outputPaths: [outputFile],
+      outputSummary: `${phase} completed via direct LLM call`,
+      elapsedMs: result.elapsedMs,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+    });
+  }
+
+  log(run, "prompt", "direct done", {
+    key: reviewer.id,
+    phase,
+    elapsedMs: result.elapsedMs,
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
+    output: fileState(run.rootDir, outputFile),
+  });
+  progress(
+    phase,
+    `${reviewer.id} done ${duration(phaseStarted)} tokens=${result.usage.inputTokens}+${result.usage.outputTokens}`,
+  );
 }
 
 /**
  * Collects reviewer findings for the current artifact state.
  *
- * Reviewers are independent specialists, so running them in parallel preserves
- * the same contract while avoiding unnecessary wall-clock delay.
+ * Reviewers run in parallel via direct LLM calls (no opencode session overhead).
  */
 async function collectFindings(
   run: RunState,
-  harness: AgentHarness,
+  _harness: AgentHarness,
   iter: IterationPaths,
+  _iterSpan?: unknown,
 ) {
   await Promise.all(
     run.profile.reviewers.map((reviewer) =>
-      promptAgent(
-        harness,
-        run,
-        reviewer.id,
-        "findings",
-        join(iter.iterDir, "prompts", `${reviewer.id}-findings.md`),
-        [join(iter.iterDir, "findings", `${reviewer.id}.json`)],
-        run.profile.findingsPrompt(iter, reviewer),
-      ),
+      directLLMPhase(run, reviewer, "findings", iter),
     ),
   );
 }
@@ -584,70 +1488,21 @@ async function runChecks(run: RunState, iter: IterationPaths) {
 /**
  * Collects reviewer votes after automated checks are available.
  *
- * Votes mirror findings: each reviewer can judge the candidate independently,
- * but now with transformed artifact, solver result, and checks.json evidence.
+ * Votes run in parallel via direct LLM calls (no opencode session overhead).
  */
 async function collectVotes(
   run: RunState,
-  harness: AgentHarness,
+  _harness: AgentHarness,
   iter: IterationPaths,
+  _iterSpan?: unknown,
 ) {
   await Promise.all(
     run.profile.reviewers.map((reviewer) =>
-      promptAgent(
-        harness,
-        run,
-        reviewer.id,
-        "vote",
-        join(iter.iterDir, "prompts", `${reviewer.id}-vote.md`),
-        [join(iter.iterDir, "votes", `${reviewer.id}.json`)],
-        run.profile.votePrompt(iter, reviewer),
-      ),
+      directLLMPhase(run, reviewer, "vote", iter),
     ),
   );
 }
 
-/**
- * Produces and normalizes the iteration decision.
- *
- * runSwarm uses this return value to either break the loop or continue. The
- * helper also caps a final `continue` as `stop_with_risks` so the run always
- * ends with a terminal decision in decision.json.
- */
-async function decideIteration(
-  run: RunState,
-  harness: AgentHarness,
-  iter: IterationPaths,
-): Promise<Decision> {
-  const decisionFile = join(iter.iterDir, "decision.json");
-  await promptAgent(
-    harness,
-    run,
-    "orchestrator",
-    "decision",
-    join(iter.iterDir, "prompts", "decision.md"),
-    [decisionFile],
-    run.profile.decisionPrompt(iter),
-  );
-  let decision = readDecision(decisionFile);
-
-  // A final `continue` would leave the run without a terminal verdict, so cap
-  // it honestly as `stop_with_risks` and keep decision.json consistent.
-  if (decision.outcome === "continue" && iter.iteration === run.maxIterations) {
-    decision = {
-      ...decision,
-      outcome: "stop_with_risks",
-      reason: `max iterations reached: ${decision.reason}`,
-    };
-    writeFileSync(decisionFile, JSON.stringify(decision, null, 2));
-  }
-  log(run, "decision", decision.outcome, decision);
-  progress(
-    "decision",
-    `outcome=${decision.outcome} checksPass=${decision.checksPass} accepts=${decision.accepts} blocks=${decision.blocks} reason=${quote(decision.reason)}`,
-  );
-  return decision;
-}
 
 /**
  * Writes the human-facing report after the loop has a final decision.
@@ -657,18 +1512,79 @@ async function decideIteration(
  */
 async function writeFinalReport(
   run: RunState,
-  harness: AgentHarness,
+  _harness: AgentHarness,
   decision?: Decision,
 ) {
-  await promptAgent(
-    harness,
-    run,
-    "orchestrator",
-    "report",
-    join(run.runDir, "prompts", "report.md"),
-    [join(run.runDir, "report.md"), join(run.runDir, "report.html")],
-    run.profile.reportPrompt(run, decision),
-  );
+  const model = modelForAgent("orchestrator");
+  const profilePrompt = run.profile.reportPrompt(run, decision);
+  const fileSection = embedFiles(filesToEmbedForReport(run.runDir), run.runDir);
+  const userPrompt = fileSection
+    ? `${profilePrompt.user}\n\n=== FILE CONTENTS ===\n${fileSection}`
+    : profilePrompt.user;
+
+  const promptFile = join(run.runDir, "prompts", "report.md");
+  const mdFile = join(run.runDir, "report.md");
+  const htmlFile = join(run.runDir, "report.html");
+  mkdirSync(dirname(promptFile), { recursive: true });
+  writeFileSync(promptFile, userPrompt);
+
+  const started = Date.now();
+  progress("report", `direct model=${modelName(model)} prompt=${formatBytes(Buffer.byteLength(userPrompt, "utf8"))}`);
+  log(run, "prompt", "direct start", { key: "orchestrator", phase: "report", model: modelName(model) });
+
+  const result = await callLLM({
+    model: modelName(model),
+    systemPrompt: profilePrompt.system,
+    userPrompt,
+    outputSchema: MarkdownResponseSchema,
+    maxTokens: 4000,
+    temperature: 0,
+  });
+
+  writeFileSync(mdFile, result.data.markdown);
+  writeFileSync(htmlFile, generateReportHtml(result.data.markdown, run.runDir, run.profile.artifact));
+
+  if (run.energy) {
+    run.energy.record({
+      timestamp: new Date().toISOString(),
+      model: modelName(model),
+      variant: model.variant,
+      agentKey: "orchestrator",
+      phase: "report",
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      elapsedMs: result.elapsedMs,
+    });
+  }
+
+  if (run.audit) {
+    run.audit.record({
+      runId: basename(run.runDir),
+      actionType: "report",
+      agentKey: "orchestrator",
+      agentRole: "orchestrator report phase",
+      executor: "llm",
+      modelProvider: model.providerID,
+      modelId: model.modelID,
+      modelVariant: model.variant,
+      promptHash: hashText(userPrompt),
+      promptPath: promptFile,
+      outputPaths: [mdFile, htmlFile],
+      outputSummary: `report.md + report.html written`,
+      elapsedMs: result.elapsedMs,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+    });
+  }
+
+  log(run, "prompt", "direct done", {
+    key: "orchestrator", phase: "report",
+    elapsedMs: result.elapsedMs,
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
+    outputChars: result.data.markdown.length,
+  });
+  progress("report", `done ${duration(started)} tokens=${result.usage.inputTokens}+${result.usage.outputTokens}`);
 }
 
 /**
@@ -778,7 +1694,7 @@ async function sessionFor(
     log(run, "session", "reuse", { key, id: harness.sessions[key] });
     return harness.sessions[key];
   }
-  const model = modelSpec();
+  const model = modelForAgent(key);
   const agent = process.env.SWARM_AGENT || "build";
   const title = `swarm ${key} ${relative(run.rootDir, run.runDir)}`;
   const sessionStarted = Date.now();
@@ -788,7 +1704,7 @@ async function sessionFor(
     agent,
     model: modelName(model),
     variant: model.variant,
-    permission: "allow-all",
+    permission: "fixer-restricted",
   });
   const result = await harness.client.session
     .create({
@@ -800,7 +1716,7 @@ async function sessionFor(
         id: model.modelID,
         variant: model.variant,
       },
-      permission: allowAll,
+      permission: fixerPermissions,
     })
     .catch((error: unknown) => {
       log(run, "session", "create threw", {
@@ -861,9 +1777,10 @@ async function promptAgent(
   promptFile: string,
   outputs: string[],
   text: string,
+  _parent?: unknown,
 ) {
   const sessionID = await sessionFor(harness, run, key);
-  const model = modelSpec();
+  const model = modelForAgent(key);
   const agent = process.env.SWARM_AGENT || "build";
   const before = outputTimes(outputs);
   mkdirSync(dirname(promptFile), { recursive: true });
@@ -935,6 +1852,63 @@ async function promptAgent(
     phase,
     `${key} done ${duration(promptStarted)} ${formatStates(finalOutputs)}`,
   );
+
+  // Energy meter recording
+  if (run.energy) {
+    const { input: inputTokens, output: outputTokens } = extractTokens(result.data);
+    const call: LLMCall = {
+      timestamp: new Date().toISOString(),
+      model: modelName(model),
+      variant: model.variant,
+      agentKey: key,
+      phase,
+      inputTokens,
+      outputTokens,
+      elapsedMs: Date.now() - promptStarted,
+    };
+    run.energy.record(call);
+  }
+
+  // Audit trail recording
+  if (run.audit) {
+    run.audit.record({
+      runId: basename(run.runDir),
+      iteration: extractIterationFromPath(promptFile),
+      actionType: phaseToActionType(phase),
+      agentKey: key,
+      agentRole: `${key} agent in phase ${phase}`,
+      executor: "llm",
+      modelProvider: model.providerID,
+      modelId: model.modelID,
+      modelVariant: model.variant,
+      promptHash: hashText(text),
+      promptPath: promptFile,
+      outputPaths: outputs,
+      outputSummary: `phase ${phase} produced ${outputs.length} file(s)`,
+      elapsedMs: Date.now() - promptStarted,
+      inputTokens: extractTokens(result.data).input || undefined,
+      outputTokens: extractTokens(result.data).output || undefined,
+    });
+  }
+}
+
+function extractIterationFromPath(p: string): number | undefined {
+  const match = p.match(/iterations[/\\](\d+)/);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+function phaseToActionType(phase: string): ActionType {
+  const map: Record<string, ActionType> = {
+    brief: "brief",
+    findings: "findings",
+    aggregate: "aggregate",
+    fix: "fix",
+    vote: "vote",
+    decision: "decide",
+    report: "report",
+    narrative: "narrative",
+  };
+  return map[phase] || "brief";
 }
 
 /**
@@ -1008,6 +1982,9 @@ function fileState(rootDir: string, path: string) {
  * @returns Resolves with the final {@link FileOutputState} array once all outputs are ready.
  * @throws `Error` if `SWARM_AGENT_TIMEOUT_MS` elapses before all outputs are ready.
  */
+// waitForOutputs is called exclusively from promptAgent, which is only invoked
+// for the fixer step. All other phases (findings, vote, brief, report) use
+// directLLMPhase / writeBrief / writeFinalReport which write files synchronously.
 async function waitForOutputs(
   run: RunState,
   outputs: string[],
@@ -1054,40 +2031,6 @@ async function waitForOutputs(
   );
 }
 
-/**
- * Reads and strictly validates a `decision.json` file written by the orchestrator.
- * Throws descriptive errors for every required field that is missing or of the wrong type,
- * rather than silently producing an invalid {@link Decision}.
- *
- * @param file - Absolute path to the decision JSON file.
- * @returns A fully-typed and validated {@link Decision}.
- * @throws If the file is not valid JSON or any required field fails its type check.
- */
-function readDecision(file: string): Decision {
-  const data = JSON.parse(readFileSync(file, "utf8")) as Partial<Decision>;
-  const outcome = data.outcome;
-  if (
-    outcome !== "accept" &&
-    outcome !== "continue" &&
-    outcome !== "stop_with_risks"
-  )
-    throw new Error(`invalid decision outcome: ${file}`);
-  if (typeof data.reason !== "string")
-    throw new Error(`invalid decision reason: ${file}`);
-  if (typeof data.checksPass !== "boolean")
-    throw new Error(`invalid decision checksPass: ${file}`);
-  if (typeof data.accepts !== "number")
-    throw new Error(`invalid decision accepts: ${file}`);
-  if (typeof data.blocks !== "number")
-    throw new Error(`invalid decision blocks: ${file}`);
-  return {
-    outcome,
-    reason: data.reason,
-    checksPass: data.checksPass,
-    accepts: data.accepts,
-    blocks: data.blocks,
-  };
-}
 
 /**
  * Starts a local HTTP server that serves run artifacts from `runDir`.
@@ -1178,12 +2121,17 @@ function listen(server: Server, port: number) {
 }
 
 /**
+ * Parsed representation of a model selection passed to the opencode SDK.
+ */
+type ModelSpec = { providerID: string; modelID: string; variant: string };
+
+/**
  * Parses the `SWARM_MODEL` environment variable into its constituent parts.
  * Expected format: `<providerID>/<modelID>` (e.g. `"deepseek/deepseek-v4-flash"`).
  *
  * @returns Object with `providerID`, `modelID`, and `variant`.
  */
-function modelSpec() {
+function modelSpec(): ModelSpec {
   const [providerID, ...rest] = (
     process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash"
   ).split("/");
@@ -1192,6 +2140,30 @@ function modelSpec() {
     modelID: rest.join("/"),
     variant: process.env.SWARM_VARIANT || "max",
   };
+}
+
+/**
+ * Returns the model spec for the given logical agent key.
+ *
+ * The fixer agent defaults to a more capable model (`deepseek/deepseek-v4-pro`,
+ * variant `max`) because it performs multi-file edits that benefit from higher
+ * reasoning capacity. Override via `SWARM_FIXER_MODEL` / `SWARM_FIXER_VARIANT`.
+ * All other agents use the global `SWARM_MODEL` / `SWARM_VARIANT` spec.
+ *
+ * @param key - Logical agent key (e.g. `"fixer"`, `"orchestrator"`, reviewer ID).
+ */
+function modelForAgent(key: string): ModelSpec {
+  if (key === "fixer") {
+    const raw =
+      process.env.SWARM_FIXER_MODEL || "deepseek/deepseek-v4-pro";
+    const [providerID, ...rest] = raw.split("/");
+    return {
+      providerID,
+      modelID: rest.join("/"),
+      variant: process.env.SWARM_FIXER_VARIANT || "max",
+    };
+  }
+  return modelSpec();
 }
 
 /**
@@ -1323,18 +2295,6 @@ function shortID(id: string) {
   return id.length <= 16 ? id : `${id.slice(0, 8)}...${id.slice(-4)}`;
 }
 
-/**
- * Collapses whitespace in `text`, then JSON-serializes and truncates to 160 characters.
- * Produces a safely-quoted single-line string for embedding in log lines.
- *
- * @param text - Arbitrary text to quote.
- */
-function quote(text: string) {
-  const clean = text.replace(/\s+/g, " ").trim();
-  return JSON.stringify(
-    clean.length > 160 ? `${clean.slice(0, 157)}...` : clean,
-  );
-}
 
 /**
  * Calls `JSON.stringify` for log data. If serialization throws, such as for
