@@ -594,9 +594,9 @@ function wcagForTags(tags: unknown) {
   return refs.length ? refs : undefined;
 }
 
-// Agent prompts read compact axe artifacts by default. Raw axe output is kept in
-// sidecar files, so the compact form keeps rule metadata, a small node sample,
-// and extra locators without flooding the context window.
+// Agent prompts read compact axe artifacts by default. Raw axe output is kept
+// in sidecar files, so the compact form keeps rule metadata, a small node
+// sample, and extra locators without flooding the context window.
 //
 // Exported (not on the public runSwarm API) so unit tests can pin slicing,
 // group-merging, and tag-enrichment behavior without spinning up Chromium.
@@ -607,9 +607,10 @@ export function compactAxeViolations(violations: AxeViolationInput[]) {
     const sampledTargets = new Set(
       sampledNodes.map((node) => JSON.stringify(truncateAxeTarget(node.target))),
     );
+    // Omitted nodes still need locators for repeated failures, but not their
+    // full HTML/check payloads. De-dup against sampled keeps the same
+    // selector from appearing twice in a violation.
     const additionalTargets: unknown[][] = [];
-    // Omitted nodes still need locators for repeated failures, but not their full
-    // HTML/check payloads. De-duping keeps repeated selectors from dominating.
     for (const node of nodes.slice(AXE_NODE_SAMPLE_LIMIT)) {
       const target = truncateAxeTarget(node.target);
       if (!target.length) continue;
@@ -629,7 +630,16 @@ export function compactAxeViolations(violations: AxeViolationInput[]) {
       tags: stringArray(violation.tags),
       wcag: wcagForTags(violation.tags),
       nodeCount: nodes.length,
-      nodes: sampledNodes.map(compactAxeNode),
+      nodes: sampledNodes.map((node) => {
+        const checks = compactNodeChecks(node);
+        return omitUndefinedFields({
+          target: truncateAxeTarget(node.target),
+          impact: node.impact || undefined,
+          html: truncateEvidenceText(node.html, AXE_HTML_LIMIT),
+          failureSummary: truncateEvidenceText(node.failureSummary, AXE_FAILURE_SUMMARY_LIMIT),
+          checks: checks.length ? checks : undefined,
+        });
+      }),
       additionalTargets: additionalTargets.length ? additionalTargets : undefined,
       omittedNodes: Math.max(0, nodes.length - sampledNodes.length),
     });
@@ -649,41 +659,27 @@ function compactAxeResult<T extends {
   };
 }
 
-function compactAxeNode(node: AxeNodeInput) {
-  const checks = compactChecksForNode(node);
-  // A sampled node keeps enough detail to identify and fix the issue: selector,
-  // clipped HTML, clipped failure summary, and clipped check messages.
-  return omitUndefinedFields({
-    target: truncateAxeTarget(node.target),
-    impact: node.impact || undefined,
-    html: truncateEvidenceText(node.html, AXE_HTML_LIMIT),
-    failureSummary: truncateEvidenceText(
-      node.failureSummary,
-      AXE_FAILURE_SUMMARY_LIMIT,
-    ),
-    checks: checks.length ? checks : undefined,
-  });
-}
-
-function compactChecksForNode(node: AxeNodeInput) {
-  // Axe separates checks into `any`, `all`, and `none`; keeping the group label
-  // helps a fixer understand why a node failed without preserving full payloads.
-  return [
-    ...compactCheckMessages("any", node.any),
-    ...compactCheckMessages("all", node.all),
-    ...compactCheckMessages("none", node.none),
-  ].slice(0, AXE_NODE_CHECK_LIMIT);
-}
-
-function compactCheckMessages(type: string, checks?: AxeCheckInput[]) {
-  return (checks || []).map((check) =>
-    omitUndefinedFields({
-      type,
-      id: check.id,
-      impact: check.impact || undefined,
-      message: truncateEvidenceText(check.message, AXE_CHECK_MESSAGE_LIMIT),
-    }),
-  );
+// Axe groups checks into `any`/`all`/`none`. The compact form merges all three
+// with the group label preserved (frontends sort by this), then slices once
+// across the union so the cap is global, not per-group.
+function compactNodeChecks(node: AxeNodeInput) {
+  const groups: [string, AxeCheckInput[] | undefined][] = [
+    ["any", node.any],
+    ["all", node.all],
+    ["none", node.none],
+  ];
+  return groups
+    .flatMap(([type, checks]) =>
+      (checks || []).map((check) =>
+        omitUndefinedFields({
+          type,
+          id: check.id,
+          impact: check.impact || undefined,
+          message: truncateEvidenceText(check.message, AXE_CHECK_MESSAGE_LIMIT),
+        }),
+      ),
+    )
+    .slice(0, AXE_NODE_CHECK_LIMIT);
 }
 
 // Axe targets are selectors, or nested selector arrays for frames/shadow DOM.
