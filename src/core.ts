@@ -29,23 +29,15 @@ import { serve } from "./server.js";
 
 export type { RunSwarmOptions, SwarmEvent, SwarmReporter } from "./reporter.js";
 
-/**
- * Identifies a reviewer agent participating in the swarm evaluation loop.
- * Each reviewer runs independently in its own opencode session and votes per iteration.
- */
+/** A reviewer agent: stable `id` used as session key and filename prefix, plus a human label. */
 export type Reviewer = {
-  /** Stable machine identifier used as a session key and filename prefix (e.g. `"a11y"`). */
   id: string;
-  /** Human-readable label passed into reviewer prompt templates (e.g. `"Accessibility Reviewer"`). */
   name: string;
 };
 
 /**
- * The orchestrator's verdict at the end of each iteration, written to `decision.json`.
- *
- * - `"accept"` — the orchestrator judged the artifact ready to ship.
- * - `"continue"` — issues remain; the loop should run another iteration.
- * - `"stop_with_risks"` — stop the loop and report the known risks in `reason`.
+ * Orchestrator's verdict per iteration, written to `decision.json`.
+ * `accept` ships, `continue` loops again, `stop_with_risks` halts with `reason`.
  */
 export type Decision = {
   outcome: "accept" | "continue" | "stop_with_risks";
@@ -55,40 +47,27 @@ export type Decision = {
   blocks: number;
 };
 
-/**
- * Structured output from {@link SwarmProfile.check}, representing the automated
- * validation pass run after the fixer agent applies its changes each iteration.
- */
+/** Output of {@link SwarmProfile.check} — the automated pass run after each fix. */
 export type CheckResult = {
   passed: boolean;
   failures: string[];
   [key: string]: unknown;
 };
 
-/** Filesystem paths shared across all phases of a single swarm run. */
 export type RunPaths = {
   rootDir: string;
   runDir: string;
 };
 
-/**
- * Extends {@link RunPaths} with per-iteration paths and numbering.
- * Passed to profile methods that generate prompts or consume outputs scoped to
- * a single iteration (fix, vote, decision).
- */
 export type IterationPaths = RunPaths & {
   iterDir: string;
   iteration: number;
 };
 
 /**
- * The primary extension point for `core.ts`. A `SwarmProfile` encapsulates all
- * domain-specific logic for one task category (e.g. accessibility remediation,
- * code review, security scanning).
- *
- * The swarm harness calls these methods in a fixed order:
- * `scan → briefPrompt → [fixPrompt → check → optional votePrompt →
- * decisionPrompt]* → local report`
+ * Domain-specific logic for one task category (e.g. accessibility remediation).
+ * The harness calls these methods in a fixed order: scan → briefPrompt →
+ * (fixPrompt → check → votePrompt? → decisionPrompt)* → local report.
  */
 export type SwarmProfile = {
   id: string;
@@ -104,7 +83,6 @@ export type SwarmProfile = {
   decisionPrompt(ctx: IterationPaths): string;
 };
 
-/** Explicit per-run state threaded through operational helpers. */
 export type RunState = RunPaths & {
   profile: SwarmProfile;
   input: string;
@@ -115,24 +93,7 @@ export type RunState = RunPaths & {
   harness?: AgentHarness;
 };
 
-/**
- * Executes a complete swarm run for the given profile and input.
- *
- * Orchestrates the full scan-iterate-report pipeline:
- * 1. Creates a timestamped run directory under `<rootDir>/runs/`.
- * 2. Calls `profile.scan()` to fetch and analyze the target.
- * 3. Starts (or connects to) an opencode server and opens agent sessions.
- * 4. Runs the brief prompt to produce `brief.md`.
- * 5. Iterates up to `SWARM_MAX_ITERATIONS` times:
- *    - The fixer agent applies changes to the artifact.
- *    - Automated checks validate the artifact.
- *    - Failed checks go straight into the next fixer pass.
- *    - Reviewers vote only after checks pass.
- *    - The orchestrator issues a decision.
- *    - The loop breaks early on `accept` or `stop_with_risks`.
- * 6. A local deterministic report writer creates `report.md` and `report.html`.
- * 7. A local HTTP preview server starts and the final artifact is served.
- */
+/** Runs the full scan → iterate → report pipeline for one profile + input. */
 export async function runSwarm(
   profile: SwarmProfile,
   input: string,
@@ -538,12 +499,6 @@ function recordDecision(
   return decision;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Shared utilities used by the orchestrator and by harness.ts / report.ts /
-// server.ts. Kept here (rather than a separate util module) because most are
-// one-liners and core.ts is already the natural home for the RunState type.
-// ────────────────────────────────────────────────────────────────────────────
-
 export function log(run: RunState, step: string, message: string, data?: unknown) {
   const suffix = data === undefined ? "" : ` ${serialize(data)}`;
   const text = `${new Date().toISOString()} +${Date.now() - run.started}ms ${step} ${message}${suffix}\n`;
@@ -630,11 +585,7 @@ export function sleep(ms: number) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
-/**
- * Scans iteration folders `099` down to `001` and returns the newest one that
- * contains `checks.json`. Used by both the HTTP server (route fallback) and the
- * report writer (which iteration to summarize).
- */
+/** Returns the highest-numbered iteration folder that has a `checks.json`, or "". */
 export function latestIteration(runDir: string) {
   for (let i = 99; i >= 1; i--)
     if (existsSync(join(runDir, "iterations", pad(i), "checks.json")))

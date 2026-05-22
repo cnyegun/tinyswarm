@@ -28,7 +28,6 @@ type ReportInputs = {
   solver?: Record<string, unknown>;
   votes: VoteSummary[];
   originalAxe?: Record<string, unknown>;
-  briefText?: string;
 };
 
 type ReportTone = "success" | "warning" | "error" | "info";
@@ -85,8 +84,6 @@ export function writeFinalReport(run: RunState, decision?: Decision) {
     : undefined;
   const votes = iterDir ? readVoteSummaries(run, iterDir) : [];
   const originalAxe = readJsonObject(join(run.runDir, "axe.json"));
-  const briefPath = join(run.runDir, "brief.md");
-  const briefText = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : undefined;
   const report = {
     latest,
     decision,
@@ -94,7 +91,6 @@ export function writeFinalReport(run: RunState, decision?: Decision) {
     solver,
     votes,
     originalAxe,
-    briefText,
   };
   const markdown = reportMarkdown(run, report);
   const html = reportHtml(run, report);
@@ -204,7 +200,7 @@ function buildAgentCards(report: ReportInputs): AgentCard[] {
     {
       role: "orchestrator",
       title: "Orchestrator",
-      summary: briefHighlight(report.briefText),
+      summary: "Wrote the run brief: page purpose, content to preserve, and reviewer focus.",
     },
     {
       role: "fixer",
@@ -223,17 +219,6 @@ function buildAgentCards(report: ReportInputs): AgentCard[] {
     });
   }
   return cards;
-}
-
-function briefHighlight(briefText: string | undefined): string {
-  const fallback =
-    "Wrote the run brief: page purpose, content to preserve, and reviewer focus.";
-  if (!briefText) return fallback;
-  const para = briefText
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .find((p) => p && !p.startsWith("#") && !p.startsWith("-") && p.length > 30);
-  return para ? excerpt(para, 220) : fallback;
 }
 
 function fixerHighlight(solver: Record<string, unknown> | undefined): string {

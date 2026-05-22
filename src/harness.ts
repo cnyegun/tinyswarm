@@ -51,10 +51,6 @@ export type AgentHarness = {
   modelsValidated?: boolean;
 };
 
-/**
- * Snapshot of a single expected output file, used to detect whether the file
- * changed after a prompt was submitted.
- */
 type FileOutputState = {
   path: string;
   exists: boolean;
@@ -447,10 +443,7 @@ function formatStates(states: FileOutputState[]) {
     .join(" ");
 }
 
-/**
- * Polls the filesystem until all `outputs` exist and have been modified since
- * the `before` baseline, or until the configured timeout elapses.
- */
+/** Polls the filesystem until every `outputs` path has a newer mtime than `before`, or times out. */
 async function waitForOutputs(
   run: RunState,
   outputs: string[],
@@ -493,10 +486,7 @@ async function waitForOutputs(
   );
 }
 
-/**
- * Reads and strictly validates a `decision.json` file written by the orchestrator.
- * Throws descriptive errors for every required field that is missing or of the wrong type.
- */
+/** Reads `decision.json` and throws a descriptive error for each missing or wrong-typed field. */
 export function readDecision(file: string): Decision {
   const data = JSON.parse(readFileSync(file, "utf8")) as Partial<Decision>;
   const outcome = data.outcome;
@@ -524,10 +514,9 @@ export function readDecision(file: string): Decision {
 }
 
 /**
- * Parses `SWARM_MODEL` into its constituent parts.
- * `SWARM_ORCHESTRATOR_MODEL` and `SWARM_FIXER_MODEL` override it for those sessions.
- * Reviewer sessions are intentionally hard-coded to low reasoning while the
- * orchestrator and fixer stay at max.
+ * Resolves the model spec for one agent key. Orchestrator/fixer use `max`
+ * reasoning variant; reviewers and everything else use `low`. Per-role env
+ * overrides: SWARM_ORCHESTRATOR_MODEL, SWARM_FIXER_MODEL.
  */
 export function modelSpec(key?: string) {
   let model = process.env.SWARM_MODEL || "deepseek/deepseek-v4-flash";
