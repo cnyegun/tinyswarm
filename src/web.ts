@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -10,6 +10,11 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
+import {
+  startClaudeFullRun,
+  startClaudeSnapshots,
+  type ClaudeSnapshot,
+} from "./claude-backend.js";
 
 /**
  * Browser front end for the swarm.
@@ -18,7 +23,17 @@ import { fileURLToPath } from "node:url";
  * launched as a child `dist/index.js --json-events` process — the same runner
  * the Rust TUI drives — so a run can be cleanly stopped by killing that child.
  * The child's event stream is relayed to the browser over Server-Sent Events.
+ *
+ * When `SWARM_BACKEND=claude`, a run is instead handed to a pre-launched
+ * Claude Code terminal — see src/claude-backend.ts.
  */
+
+/** Generation backend for the web UI, from `SWARM_BACKEND` (default opencode). */
+function swarmBackend(): "opencode" | "claude" {
+  return process.env.SWARM_BACKEND?.trim().toLowerCase() === "claude"
+    ? "claude"
+    : "opencode";
+}
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 loadLocalEnv();
@@ -27,14 +42,34 @@ const pagePath = join(rootDir, "web", "index.html");
 const fontsDir = join(rootDir, "web", "fonts");
 const runnerPath = join(rootDir, "dist", "index.js");
 const require = createRequire(import.meta.url);
-const browserSync = require("browser-sync") as {
+
+type BrowserSyncModule = {
   create(name?: string): BrowserSyncInstance;
 };
-
 type BrowserSyncInstance = {
   init(options: Record<string, unknown>, cb: (error?: Error) => void): void;
   exit(): void;
 };
+
+/**
+ * `browser-sync` is only used to live-reload the opencode artifact. Load it
+ * lazily so the Claude backend can run on machines (or installs) where the
+ * dependency isn't present.
+ */
+let browserSync: BrowserSyncModule | null = null;
+function loadBrowserSync(): BrowserSyncModule | null {
+  if (browserSync) return browserSync;
+  try {
+    browserSync = require("browser-sync") as BrowserSyncModule;
+    return browserSync;
+  } catch (error) {
+    broadcast({
+      type: "log",
+      text: `Live preview disabled: browser-sync is not installed (${describe(error)}).`,
+    });
+    return null;
+  }
+}
 
 /** Lifecycle of the single run this server tracks at a time. */
 type RunStatus = "idle" | "running" | "completed" | "failed" | "stopped";
@@ -50,6 +85,12 @@ type RunState = {
   startedAt: number;
   /** Every event seen so far this run, so a late browser can catch up. */
   events: RunEvent[];
+  /** Absolute path to this run's directory; claude backend uses it for /artifact/. */
+  runDir?: string;
+  /** Snapshots produced by phase 1 of the claude backend. */
+  snapshots?: ClaudeSnapshot[];
+  /** Style key the user picked after seeing the snapshots. */
+  style?: string;
 };
 
 const run: RunState = { status: "idle", target: "", startedAt: 0, events: [] };
@@ -69,6 +110,9 @@ const server = createServer((req, res) => {
   if (req.method === "GET" && path === "/events") return serveEvents(res);
   if (req.method === "POST" && path === "/run") return startRun(req, res);
   if (req.method === "POST" && path === "/stop") return stopRun(res);
+  if (req.method === "POST" && path === "/pick") return pickStyle(req, res);
+  if (req.method === "GET" && path.startsWith("/artifact/"))
+    return serveArtifact(res, path);
   res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
 });
 
@@ -164,13 +208,29 @@ function startRun(req: IncomingMessage, res: ServerResponse) {
       run.target = target;
       run.startedAt = Date.now();
       run.events.length = 0;
+      run.runDir = undefined;
+      run.snapshots = undefined;
+      run.style = undefined;
       stopping = false;
       stopPreview();
       previewRunDir = "";
       previewArtifact = "transformed.html";
       respondJson(res, 200, { ok: true });
       broadcast({ type: "web_start", target, startedAt: run.startedAt });
-      spawnRun(target);
+      if (swarmBackend() === "claude") {
+        const runDir = createRunDir();
+        run.runDir = runDir;
+        startClaudeSnapshots({
+          target,
+          rootDir,
+          runDir,
+          emit: broadcast,
+          onSnapshotsReady: handleSnapshotsReady,
+          onFail: (message) => finish("failed", message),
+        });
+      } else {
+        spawnRun(target);
+      }
     })
     .catch(() => respondJson(res, 400, { error: "Could not read the request." }));
 }
@@ -205,7 +265,19 @@ function spawnRun(target: string) {
 
 /** Stops the in-progress run by killing the child process. */
 function stopRun(res: ServerResponse) {
-  if (run.status !== "running" || !child) {
+  if (run.status !== "running") {
+    respondJson(res, 409, { error: "No run is in progress." });
+    return;
+  }
+  if (swarmBackend() === "claude") {
+    // The Claude agent runs in the user's own terminal; this server has no
+    // child process to kill. TODO(claude-backend): wire a real cancel, e.g. a
+    // stop marker the playbook checks.
+    respondJson(res, 200, { ok: true });
+    finish("stopped", "Stopping the Claude terminal agent is not wired up yet.");
+    return;
+  }
+  if (!child) {
     respondJson(res, 409, { error: "No run is in progress." });
     return;
   }
@@ -242,11 +314,13 @@ function handleRunnerEvent(event: RunEvent) {
 
 function startPreview() {
   if (preview || previewStarting || !previewRunDir) return;
+  const bs = loadBrowserSync();
+  if (!bs) return;
   previewStarting = true;
   const port = Number(process.env.SWARM_LIVE_PREVIEW_PORT || 5178);
   const path = previewArtifact.split("/").map(encodeURIComponent).join("/");
   const localUrl = `http://localhost:${port}/${path}`;
-  const started = browserSync.create("swarm-live-preview");
+  const started = bs.create("swarm-live-preview");
   preview = started;
   broadcast({ type: "live_preview", status: "starting", localUrl, port });
   started.init(
@@ -322,10 +396,40 @@ function finish(status: RunStatus, message?: string) {
   });
 }
 
+/**
+ * Cap on the replay buffer. A long run can emit thousands of log lines; an
+ * unbounded `run.events` would mean every late-joining or reconnecting client
+ * has to chew through all of them, which is what made the activity log look
+ * frozen in long Claude runs.
+ *
+ * Structural events (anything that's not a plain `log`) are kept regardless,
+ * so the picker, run_complete, web_done, etc. still replay correctly — only
+ * the noisy log tail is trimmed.
+ */
+const REPLAY_LOG_CAP = 400;
+
 /** Appends an event to the run history and pushes it to every live client. */
 function broadcast(event: RunEvent) {
   run.events.push(event);
+  trimReplayBuffer();
   for (const client of clients) send(client, event);
+}
+
+function trimReplayBuffer() {
+  let logCount = 0;
+  for (const event of run.events) if (event.type === "log") logCount++;
+  if (logCount <= REPLAY_LOG_CAP) return;
+  let toDrop = logCount - REPLAY_LOG_CAP;
+  const kept: RunEvent[] = [];
+  for (const event of run.events) {
+    if (event.type === "log" && toDrop > 0) {
+      toDrop--;
+      continue;
+    }
+    kept.push(event);
+  }
+  run.events.length = 0;
+  run.events.push(...kept);
 }
 
 /** Writes one SSE `data:` frame. */
@@ -404,6 +508,117 @@ function parseUrl(body: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Creates a fresh timestamped run directory, matching core.ts's layout. */
+function createRunDir(): string {
+  const dir = join(
+    rootDir,
+    "runs",
+    new Date().toISOString().replace(/[:.]/g, "-"),
+  );
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * Phase 1 succeeded. Stash the snapshots on the run state and tell every
+ * connected browser to show the picker; the user will POST /pick next.
+ */
+function handleSnapshotsReady(snapshots: ClaudeSnapshot[]) {
+  run.snapshots = snapshots;
+  broadcast({
+    type: "snapshots_ready",
+    snapshots: snapshots.map((s) => ({
+      style: s.style,
+      name: s.name,
+      path: `/artifact/${encodeURIComponent(s.file)}`,
+    })),
+  });
+}
+
+/** POST /pick — the user chose a style; advance to the full-generation phase. */
+function pickStyle(req: IncomingMessage, res: ServerResponse) {
+  if (run.status !== "running" || !run.runDir) {
+    respondJson(res, 409, { error: "No run is in progress." });
+    return;
+  }
+  if (!run.snapshots) {
+    respondJson(res, 409, { error: "Snapshots are not ready yet." });
+    return;
+  }
+  if (run.style) {
+    respondJson(res, 409, { error: "A style is already chosen for this run." });
+    return;
+  }
+  if (swarmBackend() !== "claude") {
+    respondJson(res, 409, { error: "Style picking is only used by the Claude backend." });
+    return;
+  }
+  readBody(req)
+    .then((body) => {
+      const style = parseStyle(body, run.snapshots);
+      if (!style) {
+        respondJson(res, 400, { error: "Unknown style." });
+        return;
+      }
+      run.style = style;
+      respondJson(res, 200, { ok: true });
+      broadcast({ type: "style_picked", style });
+      startClaudeFullRun({
+        target: run.target,
+        rootDir,
+        runDir: run.runDir!,
+        style,
+        emit: broadcast,
+        finish,
+        localUrlFor: (filename) =>
+          `http://localhost:${port}/artifact/${encodeURIComponent(filename)}`,
+      });
+    })
+    .catch(() => respondJson(res, 400, { error: "Could not read the request." }));
+}
+
+/** Validates `style` from the request body against the snapshots offered. */
+function parseStyle(body: string, snapshots?: ClaudeSnapshot[]): string | undefined {
+  let raw = "";
+  try {
+    raw = String((JSON.parse(body) as { style?: unknown }).style ?? "").trim();
+  } catch {
+    return undefined;
+  }
+  if (!raw || !snapshots) return undefined;
+  return snapshots.find((s) => s.style === raw)?.style;
+}
+
+/** GET /artifact/<filename> — serves a single file from the current run dir. */
+function serveArtifact(res: ServerResponse, urlPath: string) {
+  const rel = decodeURIComponent(urlPath.slice("/artifact/".length));
+  if (
+    !run.runDir ||
+    !rel ||
+    rel.includes("/") ||
+    rel.includes("\\") ||
+    rel.includes("..")
+  ) {
+    res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
+    return;
+  }
+  const file = join(run.runDir, rel);
+  if (!existsSync(file)) {
+    res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
+    return;
+  }
+  res.writeHead(200, { "Content-Type": artifactContentType(rel) });
+  res.end(readFileSync(file));
+}
+
+function artifactContentType(name: string): string {
+  if (name.endsWith(".html")) return "text/html; charset=utf-8";
+  if (name.endsWith(".json")) return "application/json; charset=utf-8";
+  if (name.endsWith(".md")) return "text/markdown; charset=utf-8";
+  if (name.endsWith(".txt")) return "text/plain; charset=utf-8";
+  return "application/octet-stream";
 }
 
 /** Loads the project `.env` so a run has the same secrets the CLI would. */
