@@ -389,9 +389,10 @@ export async function promptAgent(
   // The assistant message ID was returned by promptAsync; messages() is the
   // only endpoint that exposes the final cost+token counts.
   const messageID = (result.data as { id?: string } | undefined)?.id;
-  const usage = messageID
-    ? await readPromptUsage(harness, sessionID, messageID)
-    : undefined;
+  const usage = await readPromptUsage(harness, sessionID, {
+    messageID,
+    promptStarted,
+  });
   if (usage) accumulateUsage(run, key, usage);
   log(run, "prompt", "done", {
     key,
@@ -597,16 +598,19 @@ export type PromptUsage = {
 async function readPromptUsage(
   harness: AgentHarness,
   sessionID: string,
-  messageID: string,
+  details: { messageID?: string; promptStarted: number },
 ): Promise<PromptUsage | undefined> {
   const result = await harness.client.session
     .messages({ sessionID, directory: undefined, limit: 20 })
     .catch(() => undefined);
   if (!result || result.error || !Array.isArray(result.data)) return undefined;
-  const entry = result.data.find(
-    (item: { info?: { id?: string; role?: string } }) =>
-      item?.info?.id === messageID && item.info.role === "assistant",
+  const entries = result.data.filter(
+    (item: { info?: { id?: string; role?: string; time?: { created?: number; completed?: number } } }) =>
+      item?.info?.role === "assistant",
   );
+  const entry = details.messageID
+    ? entries.find((item) => item.info?.id === details.messageID)
+    : latestAssistantEntry(entries, details.promptStarted);
   if (!entry) return undefined;
   const info = entry.info as {
     cost?: number;
@@ -625,6 +629,23 @@ async function readPromptUsage(
     tokensCacheRead: info.tokens?.cache?.read ?? 0,
     tokensCacheWrite: info.tokens?.cache?.write ?? 0,
   };
+}
+
+function latestAssistantEntry<
+  T extends { info?: { time?: { created?: number; completed?: number } } },
+>(entries: T[], promptStarted: number): T | undefined {
+  const recent = entries.filter((entry) => {
+    const time = messageTimeMs(entry);
+    return time === undefined || time >= promptStarted - 1000;
+  });
+  return [...(recent.length ? recent : entries)]
+    .sort((a, b) => (messageTimeMs(b) || 0) - (messageTimeMs(a) || 0))[0];
+}
+
+function messageTimeMs(entry: { info?: { time?: { created?: number; completed?: number } } }) {
+  const raw = entry.info?.time?.completed ?? entry.info?.time?.created;
+  if (typeof raw !== "number") return undefined;
+  return raw < 1_000_000_000_000 ? raw * 1000 : raw;
 }
 
 // Keeps the "prompt accepted" log line bounded: the SDK returns a message

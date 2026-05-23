@@ -162,7 +162,7 @@ function prepareRun(
 ): RunState {
   const maxIterations = Math.max(
     1,
-    Number(process.env.SWARM_MAX_ITERATIONS || 3),
+    Number(process.env.SWARM_MAX_ITERATIONS || 8),
   );
   const runDir = join(
     rootDir,

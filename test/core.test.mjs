@@ -79,6 +79,9 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
   assert.match(result.preview["/report.html"].body, /class="utility-bar"/);
   assert.match(result.preview["/report.html"].body, /id="accessibility-statement"/);
   assert.match(result.preview["/report.html"].body, /--color-primary: #003580/);
+  assert.match(result.preview["/report.html"].body, /AI cost/);
+  assert.match(result.preview["/report.html"].body, /\$0\.0060/);
+  assert.match(result.preview["/report.html"].body, /Tokens used/);
   assert.doesNotMatch(result.preview["/report.html"].body, /<pre>/);
   assert.equal(result.preview["/report.html?cache=1"].status, 200);
   assert.equal(result.preview["/report.md"].contentType, "text/markdown; charset=utf-8");
@@ -99,6 +102,10 @@ test("runSwarm completes a one-iteration accepted run and writes the full artifa
   assert.match(log, /run completed/);
   assert.match(log, /opencode leaving external server open/);
   assert.equal(result.consoleLines.some((line) => line.startsWith("[scan]")), true);
+
+  const reportMd = await readText(result.runDir, "report.md");
+  assert.match(reportMd, /AI cost: \$0\.0060/);
+  assert.match(reportMd, /Tokens used: 900/);
 });
 
 test("runSwarm waits for stale pre-existing outputs to be rewritten", async () => {

@@ -273,6 +273,7 @@ function reportView(run: RunState, report: ReportInputs) {
     : undefined;
   const accepts = report.decision?.accepts ?? 0;
   const blocks = report.decision?.blocks ?? 0;
+  const usage = run.usage;
   const checkTone: ReportTone = !checksKnown
     ? "info"
     : checksPassed
@@ -295,6 +296,8 @@ function reportView(run: RunState, report: ReportInputs) {
     ),
     checks: checkStatus(report.checks),
     reviewerTally: `${accepts} accept, ${blocks} block`,
+    usageCost: usageCostValue(usage),
+    usageTokens: usageTokenValue(usage),
     violations: buildViolations(report),
     agents: buildAgentCards(report),
     changeSummary,
@@ -341,6 +344,20 @@ function reportView(run: RunState, report: ReportInputs) {
           : "No reviewer votes recorded",
         tone: blocks > 0 ? "warning" as ReportTone : "info" as ReportTone,
       },
+      {
+        label: "AI cost",
+        value: usageCostValue(usage),
+        detail: usage
+          ? "Reported by opencode/provider"
+          : "Provider did not return usage",
+        tone: "info" as ReportTone,
+      },
+      {
+        label: "Tokens used",
+        value: usageTokenValue(usage),
+        detail: usageTokenDetail(usage),
+        tone: "info" as ReportTone,
+      },
     ],
   };
 }
@@ -358,6 +375,8 @@ function reportMarkdown(run: RunState, report: ReportInputs) {
     `- Decision: ${view.decision}`,
     `- Automated checks: ${view.checks}`,
     `- Reviewer tally: ${view.reviewerTally}`,
+    `- AI cost: ${view.usageCost}`,
+    `- Tokens used: ${view.usageTokens}`,
     `- Decision reason: ${view.decisionReason}`,
     ...(view.violations.length
       ? [
@@ -799,6 +818,34 @@ function checkStatus(checks?: Record<string, unknown>) {
     ? ""
     : `, ${axeViolations} axe ${plural(axeViolations, "violation")}`;
   return `${status} (${failures.length} ${plural(failures.length, "failure")}${axe})`;
+}
+
+function usageCostValue(usage: RunState["usage"]) {
+  return usage ? `$${usage.total.cost.toFixed(4)}` : "Not reported";
+}
+
+function usageTokenValue(usage: RunState["usage"]) {
+  if (!usage) return "Not reported";
+  return formatNumber(
+    usage.total.tokensIn + usage.total.tokensOut + usage.total.tokensReasoning,
+  );
+}
+
+function usageTokenDetail(usage: RunState["usage"]) {
+  if (!usage) return "Provider did not return usage";
+  const { tokensIn, tokensOut, tokensReasoning, tokensCacheRead, tokensCacheWrite } = usage.total;
+  const parts = [
+    `input ${formatNumber(tokensIn)}`,
+    `output ${formatNumber(tokensOut)}`,
+  ];
+  if (tokensReasoning) parts.push(`reasoning ${formatNumber(tokensReasoning)}`);
+  if (tokensCacheRead) parts.push(`cache read ${formatNumber(tokensCacheRead)}`);
+  if (tokensCacheWrite) parts.push(`cache write ${formatNumber(tokensCacheWrite)}`);
+  return parts.join(", ");
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function artifactLinks(run: RunState, latest: string) {

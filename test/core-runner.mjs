@@ -211,6 +211,12 @@ const scenarios = {
     orchestratorModel: "pro-provider/pro-model",
     fixerModel: "pro-provider/pro-model",
   },
+  "null-prompt-response": {
+    maxIterations: "1",
+    checks: [true],
+    decisions: ["accept"],
+    promptResponseNull: true,
+  },
 };
 
 const scenario = scenarios[scenarioName];
@@ -608,13 +614,15 @@ async function startOpencodeServer() {
         if (scenario.delayParallelMs && phase === "vote")
           await sleep(scenario.delayParallelMs);
         if (scenario.omitOutputsForPhase !== phase) writePromptOutputs(phase, text, outputs);
-        json(res, {
-          id: `message-${state.promptRequests.length}`,
-          sessionID: promptMatch[1],
-          role: "assistant",
-          parts: [],
-          time: { created: Date.now() },
-        });
+        json(res, scenario.promptResponseNull
+          ? null
+          : {
+              id: `message-${state.promptRequests.length}`,
+              sessionID: promptMatch[1],
+              role: "assistant",
+              parts: [],
+              time: { created: Date.now() },
+            });
       } finally {
         state.activeByPhase[phase] -= 1;
       }

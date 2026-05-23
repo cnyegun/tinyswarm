@@ -223,6 +223,18 @@ test("run_complete event carries usage totals and per-agent breakdown", async ()
   assert.equal(complete.usage.byAgent.gamma.tokensIn, 100);
 });
 
+test("usage is captured when promptAsync returns no message id", async () => {
+  const result = await runScenario("null-prompt-response");
+  const complete = result.capturedEvents.find((event) => event.type === "run_complete");
+  assert.ok(complete?.usage, "run_complete missing usage roll-up");
+  assert.equal(complete.usage.total.tokensIn, 600);
+  assert.equal(complete.usage.total.tokensOut, 300);
+  assert.ok(
+    Math.abs(complete.usage.total.cost - 0.006) < 1e-9,
+    `total cost: ${complete.usage.total.cost}`,
+  );
+});
+
 test("usage summary line appears in the CLI summary block", async () => {
   const result = await runScenario("accept-first");
   // One final summary line lists totals so a CLI user sees the cost without
