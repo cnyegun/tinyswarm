@@ -24,13 +24,21 @@ test("captures the full accept-first event stream with stable shapes", async () 
   assert.equal(result.error, undefined);
 
   // The event-type/phase/status sequence is the contract the TUI watches.
-  // Filter to a compact discriminator so the assertion stays readable and
-  // failures point at exactly which event was added, removed, or reordered.
+  // We split it into a sequential prefix (single-agent phases — strict order)
+  // and a parallel vote block (reviewers race; only per-reviewer ordering is
+  // guaranteed). Pinning cross-reviewer interleaving makes the test brittle
+  // against any extra await inside promptAgent (e.g. token-usage fetch).
   const sequence = result.capturedEvents
     .filter((event) => event.type !== "progress")
     .map(eventDiscriminator);
 
-  assert.deepEqual(sequence, [
+  // Locate the boundaries of the parallel vote block.
+  const voteStart = sequence.indexOf("check:1:passed") + 1;
+  const decisionStart = sequence.indexOf("prompt:decision:orchestrator:start");
+  assert.ok(voteStart > 0 && decisionStart > voteStart);
+
+  // Sequential prefix: everything up through check:1:passed is strictly ordered.
+  assert.deepEqual(sequence.slice(0, voteStart), [
     "run_start",
     "phase:scan:start",
     "phase:scan:completed",
@@ -43,19 +51,10 @@ test("captures the full accept-first event stream with stable shapes", async () 
     "prompt:fix:fixer:done",
     "check:1:start",
     "check:1:passed",
-    // Three reviewer prompts run in parallel; one reviewer event per vote.
-    "prompt:vote:alpha:start",
-    "prompt:vote:beta:start",
-    "prompt:vote:alpha:accepted",
-    "prompt:vote:alpha:done",
-    "reviewer:alpha:accept",
-    "prompt:vote:gamma:start",
-    "prompt:vote:beta:accepted",
-    "prompt:vote:beta:done",
-    "reviewer:beta:accept",
-    "prompt:vote:gamma:accepted",
-    "prompt:vote:gamma:done",
-    "reviewer:gamma:accept",
+  ]);
+
+  // Sequential suffix: decision, iteration close, report, serve, run_complete.
+  assert.deepEqual(sequence.slice(decisionStart), [
     "prompt:decision:orchestrator:start",
     "prompt:decision:orchestrator:accepted",
     "prompt:decision:orchestrator:done",
@@ -66,6 +65,25 @@ test("captures the full accept-first event stream with stable shapes", async () 
     "serve",
     "run_complete",
   ]);
+
+  // Parallel block: same set of events regardless of interleaving, and each
+  // reviewer's own events appear in start → accepted → done → reviewer order.
+  const voteBlock = sequence.slice(voteStart, decisionStart);
+  const expectedPerReviewer = (id) => [
+    `prompt:vote:${id}:start`,
+    `prompt:vote:${id}:accepted`,
+    `prompt:vote:${id}:done`,
+    `reviewer:${id}:accept`,
+  ];
+  for (const id of ["alpha", "beta", "gamma"]) {
+    const own = voteBlock.filter((entry) => entry.includes(`:${id}:`));
+    assert.deepEqual(own, expectedPerReviewer(id), `out-of-order events for ${id}`);
+  }
+  assert.equal(
+    voteBlock.length,
+    12,
+    `parallel block should be 3 reviewers × 4 events: got ${voteBlock.length}`,
+  );
 });
 
 test("run_start event carries the run metadata consumers need", async () => {
@@ -154,6 +172,66 @@ test("run_complete event carries final paths and the served URL", async () => {
   assert.equal(typeof complete.report, "string");
   assert.equal(typeof complete.logFile, "string");
   assert.match(complete.localUrl, /^http:\/\/localhost:\d+$/);
+});
+
+test("every prompt:done event carries usage with cost+token fields", async () => {
+  const result = await runScenario("accept-first");
+  // The mock returns a constant cost=0.001 and tokens={in:100, out:50, ...}
+  // per prompt so we can assert deterministic shape AND non-zero values.
+  // accept-first issues 6 prompts: brief, fix, vote×3, decision.
+  const done = result.capturedEvents.filter(
+    (event) => event.type === "prompt" && event.status === "done" && event.agent !== "local",
+  );
+  assert.equal(done.length, 6, `expected 6 prompt:done events, got ${done.length}`);
+
+  for (const event of done) {
+    assert.ok(event.usage, `prompt:done for ${event.agent} missing usage`);
+    assert.equal(event.usage.cost, 0.001);
+    assert.equal(event.usage.tokensIn, 100);
+    assert.equal(event.usage.tokensOut, 50);
+    assert.equal(event.usage.tokensReasoning, 0);
+    assert.equal(event.usage.tokensCacheRead, 0);
+    assert.equal(event.usage.tokensCacheWrite, 0);
+  }
+});
+
+test("run_complete event carries usage totals and per-agent breakdown", async () => {
+  const result = await runScenario("accept-first");
+  const complete = result.capturedEvents.find((event) => event.type === "run_complete");
+  assert.ok(complete);
+  assert.ok(complete.usage, "run_complete missing usage roll-up");
+
+  // 6 prompts × 0.001 cost = 0.006; 6 × 100 in = 600; 6 × 50 out = 300.
+  // Floating-point cost sums to a number close to 0.006 — use approximate
+  // equality so we don't bind the test to a specific rounding artifact.
+  assert.ok(
+    Math.abs(complete.usage.total.cost - 0.006) < 1e-9,
+    `total cost: ${complete.usage.total.cost}`,
+  );
+  assert.equal(complete.usage.total.tokensIn, 600);
+  assert.equal(complete.usage.total.tokensOut, 300);
+
+  // Per-agent: orchestrator runs brief + decision (2 prompts); fixer runs
+  // fix (1); each reviewer runs one vote (1 each). Totals must match.
+  const orchestrator = complete.usage.byAgent.orchestrator;
+  assert.equal(orchestrator.tokensIn, 200, "orchestrator handled brief+decision");
+  assert.equal(orchestrator.tokensOut, 100);
+
+  assert.equal(complete.usage.byAgent.fixer.tokensIn, 100);
+  assert.equal(complete.usage.byAgent.alpha.tokensIn, 100);
+  assert.equal(complete.usage.byAgent.beta.tokensIn, 100);
+  assert.equal(complete.usage.byAgent.gamma.tokensIn, 100);
+});
+
+test("usage summary line appears in the CLI summary block", async () => {
+  const result = await runScenario("accept-first");
+  // One final summary line lists totals so a CLI user sees the cost without
+  // parsing JSON. Skipped silently if no usage was collected (e.g. provider
+  // omits it, or every prompt's usage fetch failed).
+  const summary = result.capturedLines.find((line) => line.startsWith("Tokens:"));
+  assert.ok(summary, `missing usage summary line: ${JSON.stringify(result.capturedLines)}`);
+  assert.match(summary, /in=600 out=300/);
+  assert.match(summary, /cost=\$0\.0060/);
 });
 
 test("every event carries timestamp and elapsedMs", async () => {

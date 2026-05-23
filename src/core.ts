@@ -17,6 +17,7 @@ import {
 } from "./reporter.js";
 import {
   type AgentHarness,
+  type PromptUsage,
   closeHarness,
   ensureHarness,
   modelName,
@@ -91,6 +92,10 @@ export type RunState = RunPaths & {
   started: number;
   reporter: SwarmReporter;
   harness?: AgentHarness;
+  // Accumulated cost+tokens across every prompt this run. Populated lazily
+  // by the harness on the first successful prompt:done. Best-effort: a
+  // provider that doesn't report usage leaves these counters at zero.
+  usage?: { total: PromptUsage; byAgent: Record<string, PromptUsage> };
 };
 
 /** Runs the full scan → iterate → report pipeline for one profile + input. */
@@ -129,6 +134,7 @@ export async function runSwarm(
       report: shown(run.rootDir, join(run.runDir, "report.html")),
       logFile: shown(run.rootDir, run.logFile),
       localUrl: `http://localhost:${served.port}`,
+      usage: run.usage,
     });
     line(run, `Run: ${shown(run.rootDir, run.runDir)}`);
     line(run, `Brief: ${shown(run.rootDir, join(run.runDir, "brief.md"))}`);
@@ -139,6 +145,7 @@ export async function runSwarm(
     );
     line(run, `Log: ${shown(run.rootDir, run.logFile)}`);
     line(run, `Local: http://localhost:${served.port}`);
+    if (run.usage) line(run, formatUsageSummary(run.usage));
   } catch (error) {
     emit(run, { type: "error", message: describe(error) });
     throw error;
@@ -546,6 +553,18 @@ export function fileState(rootDir: string, path: string) {
 
 export function outputName(path: string) {
   return basename(path);
+}
+
+// One-line human summary of total tokens + cost for the CLI summary block.
+// Per-agent breakdown lives in run_complete.usage.byAgent for machine consumers.
+function formatUsageSummary(usage: {
+  total: PromptUsage;
+  byAgent: Record<string, PromptUsage>;
+}) {
+  const { tokensIn, tokensOut, tokensReasoning, tokensCacheRead, cost } = usage.total;
+  const cache = tokensCacheRead ? ` cache_read=${tokensCacheRead}` : "";
+  const reasoning = tokensReasoning ? ` reasoning=${tokensReasoning}` : "";
+  return `Tokens: in=${tokensIn} out=${tokensOut}${reasoning}${cache} cost=$${cost.toFixed(4)}`;
 }
 
 export function formatBytes(bytes?: number) {

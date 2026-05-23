@@ -385,11 +385,20 @@ export async function promptAgent(
     phase,
     sessionID,
   });
+  // Best-effort: provider/SDK errors here must never break a finished run.
+  // The assistant message ID was returned by promptAsync; messages() is the
+  // only endpoint that exposes the final cost+token counts.
+  const messageID = (result.data as { id?: string } | undefined)?.id;
+  const usage = messageID
+    ? await readPromptUsage(harness, sessionID, messageID)
+    : undefined;
+  if (usage) accumulateUsage(run, key, usage);
   log(run, "prompt", "done", {
     key,
     sessionID,
     elapsedMs: Date.now() - promptStarted,
     outputs: finalOutputs,
+    usage,
   });
   emit(run, {
     type: "prompt",
@@ -398,14 +407,45 @@ export async function promptAgent(
     status: "done",
     sessionID: shortID(sessionID),
     outputs: finalOutputs,
+    usage,
   });
   const outputEvent = promptOutputEvent(key, phase, outputs);
   if (outputEvent) emit(run, outputEvent);
   progress(
     run,
     phase,
-    `${key} done ${duration(promptStarted)} ${formatStates(finalOutputs)}`,
+    `${key} done ${duration(promptStarted)} ${formatStates(finalOutputs)}${usage ? ` tokens=${usage.tokensIn}/${usage.tokensOut}` : ""}`,
   );
+}
+
+// Adds one prompt's usage to the running totals on RunState. Total is kept
+// as a flat sum; per-agent breakdown buckets reviewers by their `key` so the
+// roll-up shows orchestrator vs fixer vs each reviewer cost individually.
+function accumulateUsage(run: RunState, key: string, delta: PromptUsage) {
+  run.usage ??= { total: zeroUsage(), byAgent: {} };
+  addInto(run.usage.total, delta);
+  run.usage.byAgent[key] ??= zeroUsage();
+  addInto(run.usage.byAgent[key], delta);
+}
+
+function zeroUsage(): PromptUsage {
+  return {
+    cost: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    tokensReasoning: 0,
+    tokensCacheRead: 0,
+    tokensCacheWrite: 0,
+  };
+}
+
+function addInto(target: PromptUsage, delta: PromptUsage) {
+  target.cost += delta.cost;
+  target.tokensIn += delta.tokensIn;
+  target.tokensOut += delta.tokensOut;
+  target.tokensReasoning += delta.tokensReasoning;
+  target.tokensCacheRead += delta.tokensCacheRead;
+  target.tokensCacheWrite += delta.tokensCacheWrite;
 }
 
 function outputTimes(outputs: string[]) {
@@ -533,6 +573,58 @@ export function modelSpec(key?: string) {
 
 export function modelName(model: { providerID: string; modelID: string }) {
   return `${model.providerID}/${model.modelID}`;
+}
+
+/**
+ * Per-prompt token + cost usage extracted from one opencode AssistantMessage.
+ * `cost` is in USD as reported by the provider; tokens are split into the
+ * fields opencode exposes. All values default to 0 when a provider omits them.
+ */
+export type PromptUsage = {
+  cost: number;
+  tokensIn: number;
+  tokensOut: number;
+  tokensReasoning: number;
+  tokensCacheRead: number;
+  tokensCacheWrite: number;
+};
+
+/**
+ * Fetches the assistant message for the just-completed prompt and returns its
+ * cost+tokens. Returns undefined on any failure (network, SDK error, message
+ * not yet present) — usage telemetry is best-effort and never blocks a run.
+ */
+async function readPromptUsage(
+  harness: AgentHarness,
+  sessionID: string,
+  messageID: string,
+): Promise<PromptUsage | undefined> {
+  const result = await harness.client.session
+    .messages({ sessionID, directory: undefined, limit: 20 })
+    .catch(() => undefined);
+  if (!result || result.error || !Array.isArray(result.data)) return undefined;
+  const entry = result.data.find(
+    (item: { info?: { id?: string; role?: string } }) =>
+      item?.info?.id === messageID && item.info.role === "assistant",
+  );
+  if (!entry) return undefined;
+  const info = entry.info as {
+    cost?: number;
+    tokens?: {
+      input?: number;
+      output?: number;
+      reasoning?: number;
+      cache?: { read?: number; write?: number };
+    };
+  };
+  return {
+    cost: info.cost ?? 0,
+    tokensIn: info.tokens?.input ?? 0,
+    tokensOut: info.tokens?.output ?? 0,
+    tokensReasoning: info.tokens?.reasoning ?? 0,
+    tokensCacheRead: info.tokens?.cache?.read ?? 0,
+    tokensCacheWrite: info.tokens?.cache?.write ?? 0,
+  };
 }
 
 // Keeps the "prompt accepted" log line bounded: the SDK returns a message
