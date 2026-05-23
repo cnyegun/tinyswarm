@@ -535,6 +535,36 @@ async function startOpencodeServer() {
       );
       return;
     }
+    // Session messages endpoint. The harness queries this after each prompt
+    // completes to extract cost+tokens for usage telemetry. Each prompt got a
+    // synthetic message-N ID returned at prompt-time; emit constant usage so
+    // tests can assert deterministic totals (cost=0.001, in=100, out=50 per
+    // prompt; 6 prompts in accept-first → cost=0.006, in=600, out=300).
+    const messagesMatch =
+      req.method === "GET" && req.url.match(/^\/session\/([^/]+)\/message\?/);
+    if (messagesMatch) {
+      const sessionID = messagesMatch[1];
+      const messages = state.promptRequests
+        .map((p, idx) => ({ p, id: `message-${idx + 1}` }))
+        .filter(({ p }) => p.sessionID === sessionID)
+        .map(({ id }) => ({
+          info: {
+            id,
+            sessionID,
+            role: "assistant",
+            cost: 0.001,
+            tokens: {
+              input: 100,
+              output: 50,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+          parts: [],
+        }));
+      json(res, messages);
+      return;
+    }
     if (req.method === "GET" && req.url.includes("/message")) {
       json(res, []);
       return;
