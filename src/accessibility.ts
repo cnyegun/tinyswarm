@@ -65,12 +65,12 @@ const AXE_CHECK_MESSAGE_LIMIT = 300;
 const AXE_NODE_CHECK_LIMIT = 8;
 
 const COLLAPSE_WHITESPACE = /\s+/g;
-// Snapshot HTML is static, so these patterns only rewrite plain href/src/srcset
-// attributes and root-relative CSS url(...) references. Anything more dynamic is
-// left unchanged instead of pretending to be a full HTML/CSS parser.
-const HTML_URL_ATTRIBUTE = /(\s(?:href|src)=)(["'])([^"']*)\2/gi;
+// Snapshot HTML is static, so these patterns only rewrite plain resource URL
+// attributes and CSS url(...) references. Anything more dynamic is left
+// unchanged instead of pretending to be a full HTML/CSS parser.
+const HTML_URL_ATTRIBUTE = /(\s(?:href|src|background)=)(["'])([^"']*)\2/gi;
 const HTML_SRCSET_ATTRIBUTE = /(\ssrcset=)(["'])([^"']*)\2/gi;
-const ROOT_RELATIVE_CSS_URL = /url\((["']?)(\/(?!\/)[^"')]+)\1\)/gi;
+const CSS_URL = /url\(\s*(["']?)([^"')]+)\1\s*\)/gi;
 
 const reviewers = [
   { id: "semantic", name: "screen-reader and semantic structure reviewer" },
@@ -371,10 +371,10 @@ async function scan(url: string, { runDir }: { runDir: string }) {
       path: join(runDir, "screenshots", "original.png"),
       fullPage: true,
     });
-    writeFileSync(
-      join(runDir, "original.html"),
-      absolutizeHtmlResources(await page.content(), page.url()),
-    );
+    const originalHtml = absolutizeHtmlResources(await page.content(), page.url());
+    writeFileSync(join(runDir, "original.html"), originalHtml);
+    if (!existsSync(join(runDir, "transformed.html")))
+      writeFileSync(join(runDir, "transformed.html"), originalHtml);
     writeFileSync(join(runDir, "facts.json"), JSON.stringify(facts, null, 2));
     // Axe `passes` and `inapplicable` are huge and not actionable for the agents.
     // Keep only actionable rule groups in both compact and full sidecars.
@@ -770,7 +770,7 @@ function absolutizeHtmlResources(html: string, baseUrl: string) {
         `${prefix}${quote}${absolutizeSrcset(value, baseUrl)}${quote}`,
     )
     .replace(
-      ROOT_RELATIVE_CSS_URL,
+      CSS_URL,
       (_match, quote: string, value: string) =>
         `url(${quote}${absolutizeUrl(value, baseUrl)}${quote})`,
     );
@@ -790,10 +790,15 @@ function absolutizeSrcset(value: string, baseUrl: string) {
 }
 
 function absolutizeUrl(value: string, baseUrl: string) {
-  // Only root-relative URLs need the original page origin. Absolute URLs,
-  // protocol-relative URLs, fragments, data URLs, and relative sibling paths are
-  // left unchanged.
-  if (!value.startsWith("/") || value.startsWith("//")) return value;
+  // Saved snapshots are served from localhost, so relative asset URLs must keep
+  // resolving against the original page. Keep anchors, special schemes, and
+  // already-absolute/protocol-relative URLs unchanged.
+  if (
+    !value ||
+    value.startsWith("#") ||
+    value.startsWith("//") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(value)
+  ) return value;
   try {
     return new URL(value, baseUrl).href;
   } catch {

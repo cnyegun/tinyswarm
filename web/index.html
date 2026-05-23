@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Accessibility Swarm</title>
+    <title>AAA — Accessibility AI Audit</title>
     <link
       rel="preload"
       href="/fonts/inter-400.woff2"
@@ -52,18 +52,26 @@
         --color-border-input: #595959;
 
         --color-success: #0a7d3c;
+        --color-success-bg: #e7f2eb;
         --color-warning: #8a6100;
+        --color-warning-bg: #fbf0d4;
         --color-error: #b3171f;
         --color-error-bg: #fae7e8;
+        --color-info: #003580;
+        --color-info-bg: #e6ebf3;
 
         --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial,
           "Liberation Sans", system-ui, sans-serif;
+        --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+          "Liberation Mono", monospace;
+
         --text-xs: 0.875rem;
         --text-sm: 1rem;
         --text-base: 1.125rem;
         --text-lg: 1.375rem;
         --text-xl: 1.75rem;
         --text-2xl: 2.25rem;
+        --text-3xl: 2.75rem;
 
         --space-1: 0.25rem;
         --space-2: 0.5rem;
@@ -72,9 +80,18 @@
         --space-5: 1.5rem;
         --space-6: 2rem;
         --space-7: 3rem;
+        --space-8: 4rem;
+        --space-9: 6rem;
 
-        --layout-max: 760px;
+        --layout-max: 1200px;
+        --layout-gutter: var(--space-5);
+
         --focus-color: #1a1a1a;
+        --focus-width: 3px;
+        --focus-offset: 2px;
+
+        --duration: 160ms;
+        --easing: ease;
       }
 
       /* ===== Base ===================================================== */
@@ -93,16 +110,27 @@
         -webkit-font-smoothing: antialiased;
       }
       :focus-visible {
-        outline: 3px solid var(--focus-color);
-        outline-offset: 2px;
+        outline: var(--focus-width) solid var(--focus-color);
+        outline-offset: var(--focus-offset);
       }
+      a { color: var(--color-primary); }
+      a:hover { text-decoration-thickness: 2px; }
+      [hidden] { display: none !important; }
 
       .col {
         width: 100%;
         max-width: var(--layout-max);
         margin: 0 auto;
-        padding-left: var(--space-5);
-        padding-right: var(--space-5);
+        padding-left: var(--layout-gutter);
+        padding-right: var(--layout-gutter);
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px; height: 1px;
+        padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0, 0, 0, 0);
+        white-space: nowrap; border: 0;
       }
 
       .skip-link {
@@ -114,47 +142,192 @@
         font-weight: 700;
         padding: var(--space-3) var(--space-4);
         border: 2px solid var(--color-primary);
+        z-index: 100;
       }
       .skip-link:focus { top: var(--space-3); }
 
-      /* ===== Header =================================================== */
-      .site-header {
+      /* ===== Utility bar (§8.1) ======================================= */
+      .util-bar {
         background: var(--color-primary);
         color: var(--color-text-inverse);
+        font-size: var(--text-xs);
+      }
+      .util-bar .col {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        min-height: 40px;
+        padding-top: var(--space-2);
+        padding-bottom: var(--space-2);
+      }
+      .util-bar__org { font-weight: 600; }
+      .util-bar__nav {
+        display: flex;
+        align-items: center;
+        gap: var(--space-5);
+      }
+      .util-bar__nav a {
+        color: var(--color-text-inverse);
+        text-decoration: none;
+      }
+      .util-bar__nav a:hover { text-decoration: underline; text-underline-offset: 3px; }
+      .util-bar__lang {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      /* ===== Brand header (§8.2) ====================================== */
+      .site-header {
+        background: var(--color-surface);
+        border-bottom: 1px solid var(--color-border);
       }
       .site-header .col {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         justify-content: space-between;
-        gap: var(--space-4);
+        gap: var(--space-5);
         padding-top: var(--space-5);
         padding-bottom: var(--space-5);
+        flex-wrap: wrap;
       }
-      .wordmark {
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-4);
+        text-decoration: none;
+        color: var(--color-text);
+      }
+      .brand__mark {
+        width: 48px;
+        height: 48px;
+        flex: none;
+        color: var(--color-primary);
+      }
+      .brand__lockup { display: flex; flex-direction: column; line-height: 1.15; }
+      .brand__wordmark {
         font-size: var(--text-xl);
         font-weight: 700;
         letter-spacing: -0.01em;
+        color: var(--color-primary);
       }
-      .site-tag {
+      .brand__tagline {
+        margin-top: var(--space-1);
         font-size: var(--text-xs);
-        font-weight: 700;
-        line-height: 1.4;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.78);
-        white-space: nowrap;
+        color: var(--color-text-muted);
       }
+      .header-quick {
+        display: flex;
+        align-items: center;
+        gap: var(--space-5);
+        font-size: var(--text-sm);
+        font-weight: 600;
+      }
+      .header-quick a { text-decoration: none; }
+      .header-quick a:hover { text-decoration: underline; }
+
+      /* ===== Accent line ============================================== */
       .accent { height: 3px; background: var(--color-accent); }
 
-      /* ===== Main ===================================================== */
-      main { flex: 1; padding-top: var(--space-7); padding-bottom: var(--space-7); }
+      /* ===== Breadcrumb (§8.4b) ======================================= */
+      .breadcrumb { background: var(--color-surface); }
+      .breadcrumb .col {
+        padding-top: var(--space-4);
+        padding-bottom: var(--space-4);
+      }
+      .breadcrumb ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2) var(--space-3);
+        font-size: var(--text-sm);
+      }
+      .breadcrumb li { display: inline-flex; align-items: center; gap: var(--space-3); }
+      .breadcrumb li + li::before {
+        content: "/";
+        color: var(--color-text-muted);
+      }
+      .breadcrumb a { text-decoration: none; }
+      .breadcrumb a:hover { text-decoration: underline; }
+      .breadcrumb [aria-current="page"] {
+        color: var(--color-text-muted);
+      }
 
-      h1 {
+      /* ===== Main layout (§6) ========================================= */
+      main { flex: 1; }
+      .layout {
+        display: grid;
+        gap: var(--space-7);
+        padding-top: var(--space-7);
+        padding-bottom: var(--space-8);
+      }
+      @media (min-width: 768px) {
+        .layout {
+          grid-template-columns: 240px 1fr;
+          gap: var(--space-8);
+        }
+      }
+      @media (min-width: 1024px) {
+        .layout {
+          grid-template-columns: 280px 1fr;
+        }
+      }
+
+      /* ===== Vertical navigation (§8.4) =============================== */
+      .sidenav { }
+      .sidenav__title {
         margin: 0 0 var(--space-3);
+        font-size: var(--text-xs);
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+      }
+      .sidenav__list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border-top: 1px solid var(--color-border);
+      }
+      .sidenav__list li {
+        border-bottom: 1px solid var(--color-border);
+      }
+      .sidenav__list a {
+        display: block;
+        padding: var(--space-4) var(--space-4);
+        color: var(--color-text);
+        font-weight: 700;
+        text-decoration: none;
+        border-left: 4px solid transparent;
+      }
+      .sidenav__list a:hover {
+        background: var(--color-surface-subtle);
+        color: var(--color-primary);
+      }
+      .sidenav__list a[aria-current="page"] {
+        color: var(--color-primary);
+        border-left-color: var(--color-primary);
+      }
+
+      /* ===== Content ================================================== */
+      .content > * + * { margin-top: var(--space-6); }
+      .content > section + section { margin-top: var(--space-9); }
+      .content > .hero { margin-top: var(--space-7); }
+      .content > section + #how,
+      .content > section + #methodology { margin-top: var(--space-9); }
+      h1 {
+        margin: 0;
         font-size: var(--text-2xl);
         font-weight: 700;
         line-height: 1.2;
         letter-spacing: -0.02em;
+        color: var(--color-primary);
       }
       h2 {
         margin: 0 0 var(--space-4);
@@ -164,22 +337,67 @@
         letter-spacing: -0.01em;
       }
       h3 {
-        margin: var(--space-6) 0 var(--space-3);
+        margin: 0 0 var(--space-3);
         font-size: var(--text-lg);
         font-weight: 600;
         line-height: 1.3;
         letter-spacing: -0.01em;
       }
+      .eyebrow {
+        display: inline-block;
+        margin-bottom: var(--space-2);
+        font-size: var(--text-xs);
+        font-weight: 700;
+        line-height: 1.4;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+      }
       .lede {
-        margin: 0 0 var(--space-6);
+        margin: 0;
         max-width: 60ch;
         color: var(--color-text-muted);
         font-size: var(--text-lg);
         line-height: 1.5;
       }
+      .prose { max-width: 70ch; }
+      .prose p { margin: 0 0 var(--space-4); }
+      .prose p:last-child { margin-bottom: 0; }
 
-      /* ===== Form ===================================================== */
-      .field { margin-bottom: var(--space-5); }
+      /* ===== Hero (§8.10) ============================================= */
+      .hero {
+        display: grid;
+        gap: var(--space-6);
+        align-items: stretch;
+        margin-top: var(--space-2);
+      }
+      @media (min-width: 900px) {
+        .hero {
+          grid-template-columns: 1fr 1fr;
+          gap: var(--space-7);
+        }
+      }
+      .hero__visual {
+        background: var(--color-primary-tint);
+        min-height: 240px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        order: -1;
+      }
+      @media (min-width: 900px) {
+        .hero__visual { order: 0; }
+      }
+      .hero__visual svg {
+        width: 80%;
+        max-width: 320px;
+        height: auto;
+        color: var(--color-primary);
+      }
+      .hero__form { display: flex; flex-direction: column; gap: var(--space-4); }
+
+      /* ===== Form (§8.7) ============================================== */
+      .field { margin: 0; }
       .field label {
         display: block;
         margin-bottom: var(--space-1);
@@ -209,7 +427,7 @@
       .search input:disabled { background: var(--color-surface-subtle); }
       .search input::placeholder { color: var(--color-text-muted); }
 
-      /* ===== Buttons ================================================== */
+      /* ===== Buttons (§8.5) =========================================== */
       .btn {
         min-height: 48px;
         padding: var(--space-3) var(--space-5);
@@ -220,7 +438,7 @@
         font-weight: 600;
         line-height: 1.2;
         cursor: pointer;
-        transition: background 160ms ease;
+        transition: background var(--duration) var(--easing);
         white-space: nowrap;
       }
       .btn-primary {
@@ -238,14 +456,37 @@
       .btn:disabled { opacity: 0.55; cursor: default; }
 
       /* ===== Run panel ================================================ */
-      .panel { margin-top: var(--space-7); }
+      .panel { padding-top: var(--space-2); }
+      .panel__head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-4);
+        margin-bottom: var(--space-4);
+        padding-bottom: var(--space-3);
+        border-bottom: 2px solid var(--color-text);
+      }
+      .panel__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+      }
+      .live-preview[aria-disabled="true"] {
+        pointer-events: none;
+        opacity: 0.55;
+      }
+      .live-preview--ready {
+        border-color: var(--color-success);
+        background: var(--color-success-bg);
+        color: var(--color-success);
+      }
       .runhead {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
         gap: var(--space-3);
-        padding-bottom: var(--space-4);
-        border-bottom: 1px solid var(--color-border);
+        padding: var(--space-4) var(--space-5);
+        background: var(--color-surface-subtle);
         margin-bottom: var(--space-5);
       }
       .dot {
@@ -272,8 +513,8 @@
       /* ===== Statistics =============================================== */
       .stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
-        gap: var(--space-3);
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: var(--space-4);
         margin-bottom: var(--space-5);
       }
       .tile {
@@ -307,11 +548,17 @@
       }
 
       /* ===== Activity log ============================================= */
+      .block-title {
+        margin: var(--space-6) 0 var(--space-3);
+        font-size: var(--text-lg);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
       .log {
         list-style: none;
         margin: 0;
-        padding: var(--space-4);
-        max-height: 320px;
+        padding: var(--space-4) var(--space-5);
+        max-height: 360px;
         overflow-y: auto;
         background: var(--color-surface);
         border: 1px solid var(--color-border);
@@ -324,13 +571,16 @@
       .log li {
         display: flex;
         gap: var(--space-4);
-        padding: 2px 0;
+        padding: var(--space-2) 0;
+        border-bottom: 1px solid var(--color-border);
       }
+      .log li:last-child { border-bottom: none; }
       .log time {
         flex: none;
-        width: 5.5rem;
+        width: 6rem;
         color: var(--color-text-muted);
         font-variant-numeric: tabular-nums;
+        font-size: var(--text-xs);
       }
       .log .msg { color: var(--color-text-muted); }
       .log .info .msg { color: var(--color-text); }
@@ -338,22 +588,30 @@
       .log .warn .msg { color: var(--color-warning); }
       .log .bad .msg { color: var(--color-error); }
 
-      /* ===== Result =================================================== */
+      /* ===== Result (§8.9 notification pattern) ======================= */
       .result {
-        margin-top: var(--space-6);
         padding: var(--space-5);
-        background: var(--color-surface);
+        background: var(--color-info-bg);
         border: 1px solid var(--color-border);
         border-left: 4px solid var(--color-primary);
       }
-      .result.completed { border-left-color: var(--color-success); }
-      .result.failed { border-left-color: var(--color-error); }
-      .result.stopped { border-left-color: var(--color-warning); }
+      .result.completed {
+        background: var(--color-success-bg);
+        border-left-color: var(--color-success);
+      }
+      .result.failed {
+        background: var(--color-error-bg);
+        border-left-color: var(--color-error);
+      }
+      .result.stopped {
+        background: var(--color-warning-bg);
+        border-left-color: var(--color-warning);
+      }
       .result h2 { margin-bottom: var(--space-2); }
       .result p {
         margin: 0 0 var(--space-4);
         max-width: 70ch;
-        color: var(--color-text-muted);
+        color: var(--color-text);
       }
       .result__link {
         font-weight: 700;
@@ -367,36 +625,102 @@
 
       /* ===== Notice =================================================== */
       .notice {
-        margin-top: var(--space-4);
         padding: var(--space-3) var(--space-4);
         background: var(--color-error-bg);
         border-left: 4px solid var(--color-error);
         font-size: var(--text-sm);
+        font-weight: 600;
       }
 
-      /* ===== Footer =================================================== */
+      /* ===== How-it-works ============================================= */
+      .info-grid {
+        display: grid;
+        gap: var(--space-5);
+      }
+      @media (min-width: 720px) {
+        .info-grid { grid-template-columns: repeat(3, 1fr); }
+      }
+      .info-card {
+        padding: var(--space-5);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+      }
+      .info-card__num {
+        display: block;
+        font-size: var(--text-xs);
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+        margin-bottom: var(--space-2);
+      }
+      .info-card h3 {
+        margin-bottom: var(--space-2);
+        font-size: var(--text-base);
+        font-weight: 700;
+      }
+      .info-card p {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--color-text-muted);
+      }
+
+      /* ===== Footer (§8.11) =========================================== */
       .site-footer {
         background: var(--color-primary-darker);
         color: var(--color-text-inverse);
+        margin-top: var(--space-8);
       }
-      .site-footer .col {
+      .site-footer a { color: var(--color-text-inverse); text-decoration: none; }
+      .site-footer a:hover { text-decoration: underline; text-underline-offset: 3px; }
+      .site-footer__grid {
+        display: grid;
+        gap: var(--space-6);
         padding-top: var(--space-7);
-        padding-bottom: var(--space-7);
+        padding-bottom: var(--space-6);
       }
-      .site-footer__title { margin: 0 0 var(--space-2); font-weight: 700; }
-      .site-footer p:last-child {
+      @media (min-width: 720px) {
+        .site-footer__grid { grid-template-columns: 2fr 1fr 1fr 1fr; }
+      }
+      .site-footer h3 {
+        margin: 0 0 var(--space-3);
+        font-size: var(--text-base);
+        font-weight: 700;
+      }
+      .site-footer p {
         margin: 0;
-        max-width: 62ch;
-        color: rgba(255, 255, 255, 0.82);
+        max-width: 38ch;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: var(--text-sm);
+        line-height: 1.55;
+      }
+      .footer-links {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
         font-size: var(--text-sm);
       }
-
-      a { color: var(--color-primary); }
-      [hidden] { display: none !important; }
+      .site-footer__bottom {
+        border-top: 1px solid rgba(255, 255, 255, 0.18);
+      }
+      .site-footer__bottom .col {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-4);
+        padding-top: var(--space-4);
+        padding-bottom: var(--space-4);
+        font-size: var(--text-xs);
+        color: rgba(255, 255, 255, 0.78);
+      }
+      .site-footer__bottom a { color: rgba(255, 255, 255, 0.92); }
 
       @media (max-width: 540px) {
         .search { flex-direction: column; }
         .search .btn { width: 100%; }
+        .util-bar .col { flex-wrap: wrap; }
       }
       @media (prefers-reduced-motion: reduce) {
         * { transition: none !important; }
@@ -406,107 +730,254 @@
   <body>
     <a href="#main" class="skip-link">Skip to main content</a>
 
+    <div class="util-bar">
+      <div class="col">
+        <span class="util-bar__org">AAA — Accessibility AI Audit · public preview</span>
+        <nav class="util-bar__nav" aria-label="Utility">
+          <a href="#contact">Contact</a>
+          <span class="util-bar__lang" aria-label="Language">EN</span>
+        </nav>
+      </div>
+    </div>
+
     <header class="site-header">
       <div class="col">
-        <span class="wordmark">Accessibility Swarm</span>
-        <span class="site-tag">AI for Good</span>
+        <a class="brand" href="/">
+          <svg
+            class="brand__mark"
+            viewBox="0 0 48 48"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="1" y="1" width="46" height="46" fill="none" stroke="currentColor" stroke-width="2" />
+            <line x1="24" y1="1" x2="24" y2="47" stroke="currentColor" stroke-width="2" />
+            <line x1="1" y1="24" x2="47" y2="24" stroke="currentColor" stroke-width="2" />
+            <circle cx="12" cy="12" r="3" fill="currentColor" />
+            <circle cx="36" cy="12" r="3" fill="currentColor" />
+            <circle cx="12" cy="36" r="3" fill="currentColor" />
+            <circle cx="36" cy="36" r="3" fill="currentColor" />
+          </svg>
+          <span class="brand__lockup">
+            <span class="brand__wordmark">AAA</span>
+            <span class="brand__tagline">Accessibility AI Audit</span>
+          </span>
+        </a>
+        <div class="header-quick">
+          <a href="#how">How it works</a>
+          <a href="#methodology">Methodology</a>
+        </div>
       </div>
     </header>
-    <div class="accent" aria-hidden="true"></div>
 
-    <main id="main" class="col">
-      <h1>Audit a page for accessibility</h1>
-      <p class="lede">
-        Paste a public page address. A team of review agents audits it,
-        rewrites it to be more accessible, and reports what changed.
-      </p>
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <div class="col">
+        <ol>
+          <li><a href="/">Home</a></li>
+          <li aria-current="page">Audit a page</li>
+        </ol>
+      </div>
+    </nav>
 
-      <form id="form" autocomplete="off" novalidate>
-        <div class="field">
-          <label for="url">Page URL</label>
-          <p id="url-help" class="field__help">
-            Enter a public http:// or https:// page address.
+    <main id="main">
+      <div class="col layout">
+        <aside class="sidenav" aria-label="Section navigation">
+          <h2 class="sidenav__title">On this page</h2>
+          <ul class="sidenav__list">
+            <li><a href="#start" aria-current="page">Start an audit</a></li>
+            <li><a href="#latest">Latest activity</a></li>
+            <li><a href="#how">How it works</a></li>
+            <li><a href="#methodology">Methodology</a></li>
+            <li><a href="#accessibility">Accessibility statement</a></li>
+          </ul>
+        </aside>
+
+        <div class="content">
+          <span class="eyebrow">Service</span>
+          <h1 id="start">Audit a page for accessibility</h1>
+          <p class="lede">
+            Paste a public page address. A team of review agents audits it,
+            rewrites it to be more accessible, and reports what changed.
           </p>
-          <div class="search">
-            <input
-              id="url"
-              type="url"
-              placeholder="https://your-page.example"
-              aria-describedby="url-help"
-            />
-            <button id="start" type="submit" class="btn btn-primary">
-              Start audit
-            </button>
-          </div>
-        </div>
-      </form>
-      <p id="error" class="notice" role="alert" hidden></p>
 
-      <section id="panel" class="panel" hidden aria-labelledby="panel-title">
-        <h2 id="panel-title">Run progress</h2>
-        <div class="runhead">
-          <span id="dot" class="dot" aria-hidden="true"></span>
-          <span id="phase" aria-live="polite">Starting</span>
-          <span id="target"></span>
-          <button id="stop" type="button" class="btn btn-secondary" hidden>
-            Stop run
-          </button>
-        </div>
+          <section class="hero" aria-label="Start an audit">
+            <div class="hero__form">
+              <form id="form" autocomplete="off" novalidate>
+                <div class="field">
+                  <label for="url">Page URL</label>
+                  <p id="url-help" class="field__help">
+                    Enter a public http:// or https:// page address.
+                  </p>
+                  <div class="search">
+                    <input
+                      id="url"
+                      type="url"
+                      placeholder="https://your-page.example"
+                      aria-describedby="url-help"
+                    />
+                    <button id="start" type="submit" class="btn btn-primary">
+                      Start audit
+                    </button>
+                  </div>
+                </div>
+              </form>
+              <p id="error" class="notice" role="alert" hidden></p>
+            </div>
+            <div class="hero__visual" aria-hidden="true">
+              <svg viewBox="0 0 200 160" xmlns="http://www.w3.org/2000/svg" focusable="false">
+                <rect x="20" y="20" width="120" height="120" fill="none" stroke="currentColor" stroke-width="2" />
+                <line x1="34" y1="44" x2="110" y2="44" stroke="currentColor" stroke-width="2" />
+                <line x1="34" y1="62" x2="126" y2="62" stroke="currentColor" stroke-width="2" />
+                <line x1="34" y1="80" x2="98" y2="80" stroke="currentColor" stroke-width="2" />
+                <line x1="34" y1="98" x2="118" y2="98" stroke="currentColor" stroke-width="2" />
+                <line x1="34" y1="116" x2="86" y2="116" stroke="currentColor" stroke-width="2" />
+                <rect x="120" y="80" width="60" height="60" fill="#ffffff" stroke="currentColor" stroke-width="2" />
+                <polyline points="132,110 146,124 170,96" fill="none" stroke="currentColor" stroke-width="3" />
+              </svg>
+            </div>
+          </section>
 
-        <div class="stats" id="stats">
-          <div class="tile">
-            <span class="tile__label">Elapsed</span>
-            <span class="tile__value" id="s-elapsed">0:00</span>
-            <span class="tile__sub">running time</span>
-          </div>
-          <div class="tile">
-            <span class="tile__label">Iteration</span>
-            <span class="tile__value" id="s-iter">—</span>
-            <span class="tile__sub" id="s-iter-sub">not started</span>
-          </div>
-          <div class="tile">
-            <span class="tile__label">Axe issues</span>
-            <span class="tile__value" id="s-axe">—</span>
-            <span class="tile__sub" id="s-axe-sub">awaiting check</span>
-          </div>
-          <div class="tile">
-            <span class="tile__label">Failing checks</span>
-            <span class="tile__value" id="s-checks">—</span>
-            <span class="tile__sub" id="s-checks-sub">awaiting check</span>
-          </div>
-          <div class="tile">
-            <span class="tile__label">Reviewer votes</span>
-            <span class="tile__value" id="s-votes">—</span>
-            <span class="tile__sub" id="s-votes-sub">accept to ship</span>
-          </div>
-        </div>
+          <section id="panel" class="panel" hidden aria-labelledby="panel-title">
+            <div class="panel__head">
+              <h2 id="panel-title">Latest activity</h2>
+              <div class="panel__actions">
+                <a
+                  id="live-preview"
+                  class="btn btn-secondary live-preview"
+                  href="#"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-disabled="true"
+                  hidden
+                >Live preview pending</a>
+                <button id="stop" type="button" class="btn btn-secondary" hidden>
+                  Stop run
+                </button>
+              </div>
+            </div>
+            <div class="runhead">
+              <span id="dot" class="dot" aria-hidden="true"></span>
+              <span id="phase" aria-live="polite">Starting</span>
+              <span id="target"></span>
+            </div>
 
-        <h3 class="block-title">Activity</h3>
-        <ol id="log" class="log"></ol>
-      </section>
+            <div class="stats" id="stats">
+              <div class="tile">
+                <span class="tile__label">Elapsed</span>
+                <span class="tile__value" id="s-elapsed">0:00</span>
+                <span class="tile__sub">running time</span>
+              </div>
+              <div class="tile">
+                <span class="tile__label">Iteration</span>
+                <span class="tile__value" id="s-iter">—</span>
+                <span class="tile__sub" id="s-iter-sub">not started</span>
+              </div>
+              <div class="tile">
+                <span class="tile__label">Axe issues</span>
+                <span class="tile__value" id="s-axe">—</span>
+                <span class="tile__sub" id="s-axe-sub">awaiting check</span>
+              </div>
+              <div class="tile">
+                <span class="tile__label">Failing checks</span>
+                <span class="tile__value" id="s-checks">—</span>
+                <span class="tile__sub" id="s-checks-sub">awaiting check</span>
+              </div>
+              <div class="tile">
+                <span class="tile__label">Reviewer votes</span>
+                <span class="tile__value" id="s-votes">—</span>
+                <span class="tile__sub" id="s-votes-sub">accept to ship</span>
+              </div>
+            </div>
 
-      <section id="result" class="result" hidden aria-live="polite">
-        <h2 id="result-title"></h2>
-        <p id="result-text"></p>
-        <div class="result__actions">
-          <a id="result-link" class="result__link" href="#" target="_blank"
-            rel="noreferrer">Open the improved page →</a
-          >
-          <a id="result-report" class="result__link" href="#" target="_blank"
-            rel="noreferrer">View the full report →</a
-          >
+            <h3 class="block-title">Activity log</h3>
+            <ol id="log" class="log"></ol>
+          </section>
+
+          <section id="result" class="result" hidden aria-live="polite">
+            <h2 id="result-title"></h2>
+            <p id="result-text"></p>
+            <div class="result__actions">
+              <a id="result-link" class="result__link" href="#" target="_blank"
+                rel="noreferrer">Open the improved page</a>
+              <a id="result-report" class="result__link" href="#" target="_blank"
+                rel="noreferrer">View the full report</a>
+            </div>
+          </section>
+
+          <section id="how" aria-labelledby="how-title">
+            <h2 id="how-title">How it works</h2>
+            <div class="info-grid">
+              <article class="info-card">
+                <span class="info-card__num">Step 1</span>
+                <h3>Scan</h3>
+                <p>Automated tools (axe-core) inspect the page for known WCAG 2.2 violations and structural issues.</p>
+              </article>
+              <article class="info-card">
+                <span class="info-card__num">Step 2</span>
+                <h3>Rewrite</h3>
+                <p>Agents iteratively rewrite the markup, addressing each finding while preserving meaning and visual intent.</p>
+              </article>
+              <article class="info-card">
+                <span class="info-card__num">Step 3</span>
+                <h3>Review</h3>
+                <p>A panel of reviewer agents vote on the rewrite. Only an accepted version is published as the improved page.</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="methodology" class="prose" aria-labelledby="methodology-title">
+            <h2 id="methodology-title">Methodology</h2>
+            <p>
+              Each audit runs in isolation. The page is fetched once and all
+              transformations are performed against a local copy.            
+            </p>
+            <p>
+              Results are supporting evidence of WCAG 2.2, it is not a WCAG conformance statement. Test and verify with assistive-technology before relying on them.
+            </p>
+          </section>
         </div>
-      </section>
+      </div>
     </main>
 
-    <footer class="site-footer">
-      <div class="col">
-        <p class="site-footer__title">Accessibility Swarm</p>
-        <p>
-          An experimental tool that audits web pages and rewrites them to be
-          more accessible. Results are supporting evidence — not a formal WCAG
-          conformance statement. Always confirm findings with manual testing.
-        </p>
+    <footer class="site-footer" id="contact">
+      <div class="col site-footer__grid">
+        <div>
+          <h3>AAA — Accessibility AI Audit</h3>
+          <p>
+            AAA runs an accessibility swarm against a web page: it captures
+            the source, asks agents to rewrite it, checks the result with
+            Playwright and axe, and serves the transformed page and report.
+          </p>
+        </div>
+        <div>
+          <h3>Service</h3>
+          <ul class="footer-links">
+            <li><a href="#start">Start an audit</a></li>
+            <li><a href="#how">How it works</a></li>
+            <li><a href="#methodology">Methodology</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>About</h3>
+          <ul class="footer-links">
+            <li><a href="#accessibility">Accessibility statement</a></li>
+            <li><a href="#contact">Contact</a></li>
+            <li><a href="#">Privacy</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Language</h3>
+          <ul class="footer-links">
+            <li><a href="#" aria-current="true">English</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="site-footer__bottom">
+        <div class="col">
+          <span>&copy; 2026 AAA — Accessibility AI Audit</span>
+          <a href="#accessibility" id="accessibility">Accessibility statement</a>
+          <a href="#">Privacy</a>
+        </div>
       </div>
     </footer>
 
@@ -523,6 +994,7 @@
       const targetEl = $("target");
       const log = $("log");
       const result = $("result");
+      const livePreview = $("live-preview");
 
       // --- run statistics -----------------------------------------------
       const run = {
@@ -565,6 +1037,18 @@
         stopBtn.textContent = "Stop run";
       }
 
+      function setLivePreview(state, url) {
+        livePreview.hidden = state === "hidden";
+        livePreview.classList.toggle("live-preview--ready", state === "ready");
+        livePreview.setAttribute("aria-disabled", state === "ready" ? "false" : "true");
+        livePreview.href = state === "ready" && url ? url : "#";
+        livePreview.textContent =
+          state === "ready" ? "Watch live preview" :
+          state === "starting" ? "Starting live preview..." :
+          state === "failed" ? "Live preview unavailable" :
+          "Live preview pending";
+      }
+
       function renderStats() {
         $("s-iter").textContent = run.iteration || "—";
         $("s-iter-sub").textContent = run.maxIterations
@@ -587,7 +1071,7 @@
           (v) => v === "accept",
         ).length;
         const cast = Object.keys(run.votes).length;
-        $("s-votes").textContent = cast ? accepts + " ✓" : "—";
+        $("s-votes").textContent = cast ? accepts + " accept" : "—";
         $("s-votes-sub").textContent = run.reviewers
           ? accepts + " of " + run.reviewers + " reviewers"
           : "accept to ship";
@@ -616,6 +1100,7 @@
         panel.hidden = false;
         targetEl.textContent = target || "";
         phaseEl.textContent = "Starting";
+        setLivePreview("pending");
         Object.assign(run, {
           startedAt: startedAt || Date.now(),
           maxIterations: 0,
@@ -740,6 +1225,14 @@
             return { level: null, text: ev.phase + ": " + ev.message };
           case "serve":
             return { level: null, text: "Preview server on " + ev.localUrl };
+          case "live_preview":
+            if (ev.status === "starting")
+              return { level: "info", text: "Starting live preview" };
+            if (ev.status === "ready")
+              return { level: "good", text: "Live preview ready" };
+            if (ev.status === "failed")
+              return { level: "warn", text: "Live preview failed: " + (ev.message || "") };
+            return null;
           case "log":
             return { level: null, text: ev.text };
           case "error":
@@ -768,6 +1261,11 @@
           startTimer();
           return;
         }
+        if (ev.type === "live_preview") {
+          if (ev.status === "starting") setLivePreview("starting", ev.localUrl);
+          if (ev.status === "ready") setLivePreview("ready", ev.localUrl);
+          if (ev.status === "failed") setLivePreview("failed", ev.localUrl);
+        }
         if (ev.type === "run_complete") {
           const decision = ev.decision || {};
           const base = (ev.localUrl || "").replace(/\/$/, "");
@@ -793,6 +1291,7 @@
             phaseEl.textContent = "Run complete";
           } else if (ev.status === "stopped") {
             phaseEl.textContent = "Run stopped";
+            setLivePreview("failed");
             showResult(
               "stopped",
               "Run stopped",

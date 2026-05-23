@@ -40,8 +40,13 @@ try {
       res.end("<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><title>Mock logo</title><rect width='24' height='24' fill='black'/></svg>");
       return;
     }
+    if (req.url === "/bg.png" || req.url === "/bg-inline.png") {
+      res.setHeader("content-type", "image/png");
+      res.end("png");
+      return;
+    }
     res.setHeader("content-type", "text/html; charset=utf-8");
-    res.end(`<!doctype html><html lang="en"><head><title>Mock Event</title><link rel="stylesheet" href="/assets/mock.css"><script type="module" src="/assets/mock.js"></script></head><body><header><nav><a href="/tickets">Learn more</a></nav></header><h1>Mock Event</h1><img src="/assets/logo.svg" alt="Mock logo"><p>Join a practical accessibility event for builders and designers.</p><button>Register</button></body></html>`);
+    res.end(`<!doctype html><html lang="en"><head><title>Mock Event</title><link rel="stylesheet" href="/assets/mock.css"><style>.hero{background-image:url(bg-inline.png)}</style><script type="module" src="/assets/mock.js"></script></head><body background="bg.png"><header><nav><a href="/tickets">Learn more</a></nav></header><h1>Mock Event</h1><img src="/assets/logo.svg" alt="Mock logo"><p>Join a practical accessibility event for builders and designers.</p><button>Register</button></body></html>`);
   });
 
   opencode = await start(async (req, res) => {
@@ -121,6 +126,8 @@ try {
   if (!original.includes(`${sourceOrigin}/assets/mock.css`)) throw new Error("original.html did not absolutize stylesheet URL");
   if (!original.includes(`${sourceOrigin}/assets/mock.js`)) throw new Error("original.html did not absolutize script URL");
   if (!original.includes(`${sourceOrigin}/assets/logo.svg`)) throw new Error("original.html did not absolutize image URL");
+  if (!original.includes(`${sourceOrigin}/bg.png`)) throw new Error("original.html did not absolutize background attribute URL");
+  if (!original.includes(`${sourceOrigin}/bg-inline.png`)) throw new Error("original.html did not absolutize CSS background URL");
   if (!checks.passed) throw new Error(`latest checks did not pass: ${JSON.stringify(checks.failures)}`);
   if (decision.outcome !== "accept") throw new Error(`expected accept decision, got ${decision.outcome}`);
   if (!report.includes("Swarm report")) throw new Error("report.html was not served");

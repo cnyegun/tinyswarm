@@ -6,6 +6,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,15 @@ const port = Number(process.env.SWARM_WEB_PORT || 5180);
 const pagePath = join(rootDir, "web", "index.html");
 const fontsDir = join(rootDir, "web", "fonts");
 const runnerPath = join(rootDir, "dist", "index.js");
+const require = createRequire(import.meta.url);
+const browserSync = require("browser-sync") as {
+  create(name?: string): BrowserSyncInstance;
+};
+
+type BrowserSyncInstance = {
+  init(options: Record<string, unknown>, cb: (error?: Error) => void): void;
+  exit(): void;
+};
 
 /** Lifecycle of the single run this server tracks at a time. */
 type RunStatus = "idle" | "running" | "completed" | "failed" | "stopped";
@@ -45,6 +55,10 @@ type RunState = {
 const run: RunState = { status: "idle", target: "", startedAt: 0, events: [] };
 const clients = new Set<ServerResponse>();
 let child: ChildProcess | null = null;
+let preview: BrowserSyncInstance | null = null;
+let previewRunDir = "";
+let previewArtifact = "transformed.html";
+let previewStarting = false;
 let stopping = false;
 
 const server = createServer((req, res) => {
@@ -78,6 +92,7 @@ setInterval(() => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     killChild("SIGKILL");
+    stopPreview();
     process.exit(0);
   });
 }
@@ -150,6 +165,9 @@ function startRun(req: IncomingMessage, res: ServerResponse) {
       run.startedAt = Date.now();
       run.events.length = 0;
       stopping = false;
+      stopPreview();
+      previewRunDir = "";
+      previewArtifact = "transformed.html";
       respondJson(res, 200, { ok: true });
       broadcast({ type: "web_start", target, startedAt: run.startedAt });
       spawnRun(target);
@@ -169,7 +187,9 @@ function spawnRun(target: string) {
   });
   // stdout carries one JSON event per line; stray non-JSON lines become logs.
   readLines(child.stdout, (line) => {
-    broadcast(parseEvent(line) ?? { type: "log", text: line });
+    const event = parseEvent(line) ?? { type: "log", text: line };
+    broadcast(event);
+    handleRunnerEvent(event);
   });
   readLines(child.stderr, (line) => broadcast({ type: "log", text: line }));
   child.on("error", (error) => {
@@ -192,11 +212,86 @@ function stopRun(res: ServerResponse) {
   stopping = true;
   const target = child;
   killChild("SIGTERM");
+  stopPreview();
   // Escalate if the runner doesn't wind down its agents promptly.
   setTimeout(() => {
     if (child === target) killChild("SIGKILL");
   }, 4000).unref();
   respondJson(res, 200, { ok: true });
+}
+
+/** Starts live preview only after scan has seeded the run artifact. */
+function handleRunnerEvent(event: RunEvent) {
+  if (event.type === "run_start") {
+    previewRunDir = typeof event.runDirAbsolute === "string"
+      ? event.runDirAbsolute
+      : "";
+    previewArtifact = typeof event.artifact === "string"
+      ? event.artifact
+      : "transformed.html";
+    return;
+  }
+  if (
+    event.type === "phase" &&
+    event.phase === "scan" &&
+    event.status === "completed"
+  ) {
+    startPreview();
+  }
+}
+
+function startPreview() {
+  if (preview || previewStarting || !previewRunDir) return;
+  previewStarting = true;
+  const port = Number(process.env.SWARM_LIVE_PREVIEW_PORT || 5178);
+  const path = previewArtifact.split("/").map(encodeURIComponent).join("/");
+  const localUrl = `http://localhost:${port}/${path}`;
+  const started = browserSync.create("swarm-live-preview");
+  preview = started;
+  broadcast({ type: "live_preview", status: "starting", localUrl, port });
+  started.init(
+    {
+      server: previewRunDir,
+      files: [join(previewRunDir, previewArtifact)],
+      startPath: previewArtifact,
+      port,
+      listen: "127.0.0.1",
+      open: false,
+      ui: false,
+      notify: false,
+      ghostMode: false,
+      reloadDebounce: 250,
+      logLevel: "silent",
+    },
+    (error?: Error) => {
+      previewStarting = false;
+      if (preview !== started) return;
+      if (!error) {
+        broadcast({ type: "live_preview", status: "ready", localUrl, port });
+        return;
+      }
+      preview = null;
+      broadcast({
+        type: "live_preview",
+        status: "failed",
+        localUrl,
+        port,
+        message: describe(error),
+      });
+    },
+  );
+}
+
+function stopPreview() {
+  const target = preview;
+  preview = null;
+  previewStarting = false;
+  if (!target) return;
+  try {
+    target.exit();
+  } catch {
+    /* already gone */
+  }
 }
 
 /** Signals the runner's whole process group, falling back to the child alone. */
