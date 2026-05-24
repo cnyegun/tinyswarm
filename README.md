@@ -1,5 +1,6 @@
 # AAA - Accessibility AI Audit
 
+__Update: we won 3rd place lets gooooooooooooooooooooo__
 AAA runs an accessibility swarm against a web page. It captures the source page, asks opencode agents to rewrite it, checks the result with Playwright and axe, then serves the transformed page and report from `runs/<timestamp>/`.
 
 ## Requirements
